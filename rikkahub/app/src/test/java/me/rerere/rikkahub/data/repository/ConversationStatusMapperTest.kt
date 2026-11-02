@@ -19,11 +19,11 @@ class ConversationStatusMapperTest {
                 id = "00000000-0000-0000-0000-000000000001",
                 assistantId = "00000000-0000-0000-0000-000000000002",
                 title = "t", isPinned = false, createAt = 0, updateAt = 0,
-                folderId = "", archivedAt = 444L, deletedAt = 0L,
+                folderId = "", archivedAt = 444L, deletedAt = 555L,
             )
         )
         assertEquals(444L, summary.archivedAt)
-        assertEquals(0L, summary.deletedAt)
+        assertEquals(555L, summary.deletedAt)
     }
 
     private fun assertRoundTrip(archivedAt: Long, deletedAt: Long) {
