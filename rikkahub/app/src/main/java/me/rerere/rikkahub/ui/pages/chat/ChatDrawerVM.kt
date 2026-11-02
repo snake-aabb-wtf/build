@@ -65,6 +65,15 @@ class ChatDrawerVM(
         .flatMapLatest { folderRepo.getFoldersOfAssistant(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // 当前助手的归档会话数，用于抽屉入口上的计数
+    val archivedCount: StateFlow<Int> = assistantIdFlow
+        .flatMapLatest { conversationRepo.countArchived(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    // 回收站会话数（回收站不区分助手）
+    val trashedCount: StateFlow<Int> = conversationRepo.countTrashed()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
     // 当前助手的记忆库是否正在后台整理；没开记忆的助手即使共用的全局记忆库在整理也不显示
     val memoryDreaming: StateFlow<Boolean> = settingsStore.settingsFlow
         .map { settings -> settings.getCurrentAssistant().takeIf { it.enableMemory }?.memoryId }

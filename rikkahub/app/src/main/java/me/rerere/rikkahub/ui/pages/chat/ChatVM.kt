@@ -308,6 +308,17 @@ class ChatVM(
             chatService.moveToTrash(conversation.id)
         }
 
+    fun archiveConversation(conversation: Conversation): Job =
+        viewModelScope.launch {
+            chatService.archiveConversation(conversation.id)
+        }
+
+    /** 删除后撤销：从回收站恢复 */
+    fun restoreConversation(conversation: Conversation): Job =
+        viewModelScope.launch {
+            chatService.restoreFromTrash(conversation)
+        }
+
     fun updatePinnedStatus(conversation: Conversation) {
         viewModelScope.launch {
             chatService.toggleConversationPinned(conversation.id)

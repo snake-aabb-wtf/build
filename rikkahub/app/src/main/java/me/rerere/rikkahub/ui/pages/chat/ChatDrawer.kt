@@ -28,6 +28,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,10 +61,12 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Delete02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderAdd
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.ImageToVideo
+import me.rerere.hugeicons.stroke.Inbox
 import me.rerere.hugeicons.stroke.InLove
 import me.rerere.hugeicons.stroke.LanguageCircle
 import me.rerere.hugeicons.stroke.LookTop
@@ -108,6 +112,7 @@ fun ChatDrawerContent(
     vm: ChatVM,
     settings: Settings,
     current: Conversation,
+    snackbarHostState: SnackbarHostState,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -120,6 +125,8 @@ fun ChatDrawerContent(
     val conversations = drawerVm.conversations.collectAsLazyPagingItems()
     val folders by drawerVm.folders.collectAsStateWithLifecycle()
     val selectedFolderId by drawerVm.selectedFolderId.collectAsStateWithLifecycle()
+    val archivedCount by drawerVm.archivedCount.collectAsStateWithLifecycle()
+    val trashedCount by drawerVm.trashedCount.collectAsStateWithLifecycle()
     val memoryDreaming by drawerVm.memoryDreaming.collectAsStateWithLifecycle()
     val conversationListState = rememberLazyListState(
         initialFirstVisibleItemIndex = drawerVm.scrollIndex,
@@ -294,6 +301,18 @@ fun ChatDrawerContent(
                     },
                 )
             }
+
+            // 归档与回收站入口，计数为 0 时也保留，方便随时进入
+            DrawerEntry(
+                icon = HugeIcons.Inbox,
+                text = stringResource(R.string.chat_page_archived, archivedCount),
+                onClick = { navController.navigate(Screen.Archived(settings.assistantId.toString())) },
+            )
+            DrawerEntry(
+                icon = HugeIcons.Delete02,
+                text = stringResource(R.string.trash_page_title, trashedCount),
+                onClick = { navController.navigate(Screen.Trash) },
+            )
         }
     }
 
@@ -327,9 +346,23 @@ fun ChatDrawerContent(
                     scope.launch {
                         vm.deleteConversation(it).join()
                         conversations.refresh()
-                        if (it.id == current.id) {
+                        // 先弹撤销，避免删除当前会话时导航离开导致 Snackbar 所在的作用域被取消
+                        val result = snackbarHostState.showSnackbar(
+                            message = context.getString(R.string.chat_page_moved_to_trash),
+                            actionLabel = context.getString(R.string.chat_page_undo),
+                        )
+                        if (result == SnackbarResult.ActionPerformed) {
+                            vm.restoreConversation(it).join()
+                            conversations.refresh()
+                        } else if (it.id == current.id) {
                             navigateToChatPage(navController)
                         }
+                    }
+                },
+                onArchive = {
+                    scope.launch {
+                        vm.archiveConversation(it).join()
+                        conversations.refresh()
                     }
                 },
                 onPin = {
