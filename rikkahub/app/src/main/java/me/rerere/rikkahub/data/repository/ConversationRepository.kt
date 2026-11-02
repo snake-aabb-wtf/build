@@ -327,6 +327,14 @@ class ConversationRepository(
     }
 
     suspend fun updateConversation(conversation: Conversation) {
+        updateConversationIfVisible(conversation)
+    }
+
+    /**
+     * 与 [updateConversation] 相同，但会告知调用方这一笔写入是否真的落库。
+     * 返回 false 表示会话在事务内已被移入回收站，写入被跳过、数据库仍指向旧数据。
+     */
+    suspend fun updateConversationIfVisible(conversation: Conversation): Boolean {
         val written = database.withTransaction {
             // 事务内复核：读取与写入之间可能有删除落库，此时不能复活该行
             if ((conversationDAO.getDeletedAtById(conversation.id.toString()) ?: 0L) > 0L) {
@@ -344,6 +352,7 @@ class ConversationRepository(
         if (written) {
             messageFtsManager.indexConversation(conversation)
         }
+        return written
     }
 
     /**

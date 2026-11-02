@@ -141,12 +141,14 @@ class ChatService(
                 }
                 return
             }
-            if (previous == null && !conversationRepo.existsConversationById(current.id)) {
+            val written = if (previous == null && !conversationRepo.existsConversationById(current.id)) {
                 conversationRepo.insertConversation(current)
+                true
             } else {
-                conversationRepo.updateConversation(current)
+                conversationRepo.updateConversationIfVisible(current)
             }
-            if (previous != null && previous.messageNodes !== current.messageNodes) {
+            // 写入被回收站校验拦下时数据库仍引用旧文件，不能清理
+            if (written && previous != null && previous.messageNodes !== current.messageNodes) {
                 withContext(Dispatchers.IO) { deleteUnreferencedFiles(previous, current) }
             }
         }
