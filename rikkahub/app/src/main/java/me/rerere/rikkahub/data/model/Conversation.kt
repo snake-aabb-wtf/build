@@ -36,6 +36,10 @@ data class Conversation(
     val workspaceCwd: String? = null,
     // 所属文件夹（助手内分组），null 表示未归入任何文件夹
     val folderId: Uuid? = null,
+    // 归档时间戳（epoch millis），0 表示未归档
+    val archivedAt: Long = 0,
+    // 移入回收站的时间戳（epoch millis），0 表示未删除
+    val deletedAt: Long = 0,
     @Transient
     val newConversation: Boolean = false
 ) {

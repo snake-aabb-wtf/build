@@ -25,12 +25,12 @@ interface ConversationDAO {
     suspend fun getTitlesOfAssistant(assistantId: String): List<String>
 
     @Query(
-        "SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, folder_id as folderId FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC"
+        "SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, folder_id as folderId, archived_at as archivedAt, deleted_at as deletedAt FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC"
     )
     fun getConversationsOfAssistantPaging(assistantId: String): PagingSource<Int, LightConversationEntity>
 
     @Query(
-        "SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, folder_id as folderId FROM conversationentity WHERE assistant_id = :assistantId AND folder_id = '' ORDER BY is_pinned DESC, CASE WHEN :sortByCreateTime THEN create_at ELSE update_at END DESC"
+        "SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, folder_id as folderId, archived_at as archivedAt, deleted_at as deletedAt FROM conversationentity WHERE assistant_id = :assistantId AND folder_id = '' ORDER BY is_pinned DESC, CASE WHEN :sortByCreateTime THEN create_at ELSE update_at END DESC"
     )
     fun getUnfiledConversationsOfAssistantPaging(
         assistantId: String,
@@ -38,7 +38,7 @@ interface ConversationDAO {
     ): PagingSource<Int, LightConversationEntity>
 
     @Query(
-        "SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, folder_id as folderId FROM conversationentity WHERE folder_id = :folderId ORDER BY is_pinned DESC, CASE WHEN :sortByCreateTime THEN create_at ELSE update_at END DESC"
+        "SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, folder_id as folderId, archived_at as archivedAt, deleted_at as deletedAt FROM conversationentity WHERE folder_id = :folderId ORDER BY is_pinned DESC, CASE WHEN :sortByCreateTime THEN create_at ELSE update_at END DESC"
     )
     fun getConversationsOfFolderPaging(
         folderId: String,
@@ -56,7 +56,7 @@ interface ConversationDAO {
     fun searchConversations(searchText: String): Flow<List<ConversationEntity>>
 
     @Query(
-        "SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, folder_id as folderId FROM conversationentity WHERE title LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC"
+        "SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, folder_id as folderId, archived_at as archivedAt, deleted_at as deletedAt FROM conversationentity WHERE title LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC"
     )
     fun searchConversationsPaging(searchText: String): PagingSource<Int, LightConversationEntity>
 
@@ -66,7 +66,7 @@ interface ConversationDAO {
     fun searchConversationsOfAssistant(assistantId: String, searchText: String): Flow<List<ConversationEntity>>
 
     @Query(
-        "SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, folder_id as folderId FROM conversationentity WHERE assistant_id = :assistantId AND title LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC"
+        "SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt, folder_id as folderId, archived_at as archivedAt, deleted_at as deletedAt FROM conversationentity WHERE assistant_id = :assistantId AND title LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC"
     )
     fun searchConversationsOfAssistantPaging(
         assistantId: String,

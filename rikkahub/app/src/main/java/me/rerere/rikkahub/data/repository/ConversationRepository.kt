@@ -25,7 +25,6 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.utils.JsonInstant
-import java.time.Instant
 import kotlin.uuid.Uuid
 
 class ConversationRepository(
@@ -377,47 +376,13 @@ class ConversationRepository(
         }
     }
 
-    fun conversationToConversationEntity(conversation: Conversation): ConversationEntity {
-        require(conversation.messageNodes.none { it.messages.any { message -> message.hasBase64Part() } })
-        return ConversationEntity(
-            id = conversation.id.toString(),
-            title = conversation.title,
-            nodes = "[]", // nodes 现在存储在单独的表中
-            createAt = conversation.createAt.toEpochMilli(),
-            updateAt = conversation.updateAt.toEpochMilli(),
-            assistantId = conversation.assistantId.toString(),
-            chatSuggestions = JsonInstant.encodeToString(conversation.chatSuggestions),
-            isPinned = conversation.isPinned,
-            customSystemPrompt = conversation.customSystemPrompt ?: "",
-            modeInjectionIds = JsonInstant.encodeToString(conversation.modeInjectionIds),
-            lorebookIds = JsonInstant.encodeToString(conversation.lorebookIds),
-            workspaceCwd = conversation.workspaceCwd ?: "",
-            folderId = conversation.folderId?.toString() ?: "",
-            config = conversation.config?.let { JsonInstant.encodeToString(it) } ?: "",
-        )
-    }
+    fun conversationToConversationEntity(conversation: Conversation): ConversationEntity =
+        ConversationMapper.toEntity(conversation)
 
     fun conversationEntityToConversation(
         conversationEntity: ConversationEntity,
         messageNodes: List<MessageNode>
-    ): Conversation {
-        return Conversation(
-            id = Uuid.parse(conversationEntity.id),
-            title = conversationEntity.title,
-            messageNodes = messageNodes.filter { it.messages.isNotEmpty() },
-            createAt = Instant.ofEpochMilli(conversationEntity.createAt),
-            updateAt = Instant.ofEpochMilli(conversationEntity.updateAt),
-            assistantId = Uuid.parse(conversationEntity.assistantId),
-            chatSuggestions = JsonInstant.decodeFromString(conversationEntity.chatSuggestions),
-            isPinned = conversationEntity.isPinned,
-            customSystemPrompt = conversationEntity.customSystemPrompt.ifEmpty { null },
-            modeInjectionIds = JsonInstant.decodeFromString(conversationEntity.modeInjectionIds),
-            lorebookIds = JsonInstant.decodeFromString(conversationEntity.lorebookIds),
-            workspaceCwd = conversationEntity.workspaceCwd.ifEmpty { null },
-            folderId = conversationEntity.folderId.ifEmpty { null }?.let { Uuid.parse(it) },
-            config = conversationEntity.config.ifEmpty { null }?.let { JsonInstant.decodeFromString(it) },
-        )
-    }
+    ): Conversation = ConversationMapper.toConversation(conversationEntity, messageNodes)
 
     fun getPinnedConversations(): Flow<List<Conversation>> {
         return conversationDAO
@@ -478,18 +443,8 @@ class ConversationRepository(
         )
     }
 
-    private fun conversationSummaryToConversation(entity: LightConversationEntity): Conversation {
-        return Conversation(
-            id = Uuid.parse(entity.id),
-            assistantId = Uuid.parse(entity.assistantId),
-            title = entity.title,
-            isPinned = entity.isPinned,
-            createAt = Instant.ofEpochMilli(entity.createAt),
-            updateAt = Instant.ofEpochMilli(entity.updateAt),
-            messageNodes = emptyList(),
-            folderId = entity.folderId.ifEmpty { null }?.let { Uuid.parse(it) },
-        )
-    }
+    private fun conversationSummaryToConversation(entity: LightConversationEntity): Conversation =
+        ConversationMapper.toSummary(entity)
 
     private suspend fun loadMessageNodes(conversationId: String): List<MessageNode> {
         val favoriteNodeIds = favoriteDAO
@@ -560,6 +515,8 @@ data class LightConversationEntity(
     val createAt: Long,
     val updateAt: Long,
     val folderId: String = "",
+    val archivedAt: Long = 0,
+    val deletedAt: Long = 0,
 )
 
 data class ConversationPageResult(
