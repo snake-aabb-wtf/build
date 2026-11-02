@@ -165,7 +165,7 @@ interface ConversationDAO {
     @Query("SELECT COUNT(*) FROM conversationentity WHERE deleted_at > 0")
     fun countTrashed(): Flow<Int>
 
-    @Query("UPDATE conversationentity SET archived_at = :now, is_pinned = 0 WHERE id = :id")
+    @Query("UPDATE conversationentity SET archived_at = :now, is_pinned = 0 WHERE id = :id AND deleted_at = 0")
     suspend fun archive(id: String, now: Long)
 
     @Query("UPDATE conversationentity SET archived_at = 0 WHERE id = :id")

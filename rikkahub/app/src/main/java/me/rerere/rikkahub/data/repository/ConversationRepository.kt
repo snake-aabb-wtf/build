@@ -336,7 +336,23 @@ class ConversationRepository(
         messageFtsManager.indexConversation(conversation)
     }
 
-    suspend fun deleteConversation(conversation: Conversation) {
+    /**
+     * 永久删除会话。只接受已经在回收站里的会话；可见会话请先 [moveToTrash]。
+     */
+    suspend fun permanentlyDeleteConversation(conversation: Conversation) {
+        val persistedDeletedAt =
+            conversationDAO.getConversationById(conversation.id.toString())?.deletedAt ?: 0L
+        require(conversation.deletedAt > 0L || persistedDeletedAt > 0L) {
+            "permanentlyDeleteConversation only accepts trashed conversations"
+        }
+        hardDeleteConversationUnchecked(conversation)
+    }
+
+    /**
+     * 不做回收站校验的硬删除，仅供 [permanentlyDeleteConversation] 与
+     * [permanentlyDeleteAllOfAssistant]（助手删除是可见会话的硬删除）使用。
+     */
+    private suspend fun hardDeleteConversationUnchecked(conversation: Conversation) {
         // 获取完整的 Conversation（包含 messageNodes）以正确清理文件
         val fullConversation = if (conversation.messageNodes.isEmpty()) {
             getConversationById(conversation.id) ?: conversation
@@ -351,6 +367,72 @@ class ConversationRepository(
             )
         }
         filesManager.deleteChatFiles(fullConversation.files)
+    }
+
+    /** 软删除：移入回收站，同时把消息从搜索索引里摘掉 */
+    suspend fun moveToTrash(id: Uuid) {
+        messageFtsManager.deleteConversation(id.toString())
+        conversationDAO.moveToTrash(id.toString(), System.currentTimeMillis())
+    }
+
+    /** 从回收站恢复：清掉删除标记并重建搜索索引 */
+    suspend fun restoreFromTrash(conversation: Conversation) {
+        conversationDAO.restoreFromTrash(conversation.id.toString())
+        messageFtsManager.indexConversation(conversation.copy(deletedAt = 0, archivedAt = 0))
+    }
+
+    /** 清空回收站：逐个永久删除。附件清理是 IO，不放进外层事务 */
+    suspend fun emptyTrash() {
+        conversationDAO.getTrashedIds().forEach { id ->
+            val uuid = runCatching { Uuid.parse(id) }.getOrNull() ?: return@forEach
+            getConversationById(uuid)?.let { permanentlyDeleteConversation(it) }
+        }
+    }
+
+    /** 助手被删除时硬删除它名下的全部会话，不经过可见性过滤 */
+    suspend fun permanentlyDeleteAllOfAssistant(assistantId: Uuid) {
+        conversationDAO.getAllIdsOfAssistant(assistantId.toString()).forEach { id ->
+            val uuid = runCatching { Uuid.parse(id) }.getOrNull() ?: return@forEach
+            getConversationById(uuid)?.let { hardDeleteConversationUnchecked(it) }
+        }
+    }
+
+    suspend fun archiveConversation(id: Uuid) {
+        conversationDAO.archive(id.toString(), System.currentTimeMillis())
+    }
+
+    suspend fun unarchiveConversation(id: Uuid) {
+        conversationDAO.unarchive(id.toString())
+        // rebuildAllIndexes 只遍历可见会话，取消归档后必须在这里补一次索引
+        getConversationById(id)?.let { messageFtsManager.indexConversation(it) }
+    }
+
+    fun getArchivedConversations(assistantId: Uuid): Flow<List<Conversation>> {
+        return conversationDAO
+            .getArchivedOfAssistant(assistantId.toString())
+            .map { conversations ->
+                conversations.map { entity ->
+                    conversationEntityToConversation(entity, emptyList())
+                }
+            }
+    }
+
+    fun countArchived(assistantId: Uuid): Flow<Int> {
+        return conversationDAO.countArchivedOfAssistant(assistantId.toString())
+    }
+
+    fun getTrashedConversations(): Flow<List<Conversation>> {
+        return conversationDAO
+            .getTrashed()
+            .map { conversations ->
+                conversations.map { entity ->
+                    conversationEntityToConversation(entity, emptyList())
+                }
+            }
+    }
+
+    fun countTrashed(): Flow<Int> {
+        return conversationDAO.countTrashed()
     }
 
     suspend fun searchMessages(
