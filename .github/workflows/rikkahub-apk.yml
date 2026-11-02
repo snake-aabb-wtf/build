@@ -1,0 +1,88 @@
+name: RikkaHub APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      gradle_task:
+        description: "Gradle task to run"
+        required: false
+        default: ":app:assembleGithubDebug"
+  push:
+    branches: [main]
+    paths:
+      - "rikkahub/**"
+      - ".github/workflows/rikkahub-apk.yml"
+      - ".github/ci/google-services.json"
+
+concurrency:
+  group: rikkahub-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: rikkahub
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: rikkahub/web-ui/pnpm-lock.yaml
+
+      - name: Install web-ui dependencies
+        working-directory: rikkahub/web-ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Provide placeholder google-services.json
+        run: cp ../.github/ci/google-services.json app/google-services.json
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('rikkahub/**/*.gradle*', 'rikkahub/gradle/wrapper/gradle-wrapper.properties', 'rikkahub/gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew ${{ github.event.inputs.gradle_task || ':app:assembleGithubDebug' }} --no-daemon --stacktrace
+
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rikkahub-apk-${{ github.run_number }}
+          path: |
+            rikkahub/app/build/outputs/apk/**/*.apk
+            rikkahub/app/build/outputs/mapping/**/mapping.txt
+          if-no-files-found: warn
+          retention-days: 30
