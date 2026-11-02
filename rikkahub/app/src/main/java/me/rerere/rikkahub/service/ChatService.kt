@@ -1093,27 +1093,94 @@ class ChatService(
     // ---- 删除会话 ----
 
     /**
-     * 删除会话：停掉生成后在会话的写锁内删库，内存换成一个还没落过库的新会话。
+     * 移入回收站：停掉生成后在会话的写锁内标记删除，内存换成一个还没落过库的新会话。
      * 还停在这个会话上的页面看到的是空会话，之后再发消息会新建记录，不会写回已删除的那条。
      */
-    suspend fun deleteConversation(conversationId: Uuid) {
+    suspend fun moveToTrash(conversationId: Uuid) {
+        val session = sessionManager.getOrCreate(conversationId)
+        discardQueuedMessages(session)
+        session.replace(newConversation(conversationId), existsInDatabase = false) {
+            conversationRepo.moveToTrash(conversationId)
+        }
+        sessionManager.removeIfIdle(session)
+    }
+
+    /** 删除会话。语义已变为移入回收站，只为还没迁移的调用方保留。 */
+    @Deprecated("Use moveToTrash; kept for callers that have not migrated yet")
+    suspend fun deleteConversation(conversationId: Uuid) = moveToTrash(conversationId)
+
+    /** 永久删除：只接受已在回收站里的会话 */
+    suspend fun permanentlyDelete(conversationId: Uuid) {
         val session = sessionManager.getOrCreate(conversationId)
         discardQueuedMessages(session)
         session.replace(newConversation(conversationId), existsInDatabase = false) { previous ->
-            conversationRepo.getConversationById(conversationId)?.let { conversationRepo.permanentlyDeleteConversation(it) }
+            conversationRepo.getConversationById(conversationId)
+                ?.let { conversationRepo.permanentlyDeleteConversation(it) }
             // 数据库那份不知道只在内存里出现过的附件
             previous?.let { filesManager.deleteChatFiles(it.files) }
         }
         sessionManager.removeIfIdle(session)
     }
 
-    /** 撤销删除：写回删除前的会话，还停在这个会话上的页面也一并换回 */
-    suspend fun restoreConversation(conversation: Conversation) {
-        val session = sessionManager.getOrCreate(conversation.id)
-        session.replace(conversation, existsInDatabase = true) {
-            conversationStore.write(previous = null, current = conversation)
+    /** 清空回收站：库里的行由仓库逐条永久删除，内存里还停在已删除会话上的页面换成空会话 */
+    suspend fun emptyTrash() {
+        val trashedSessions = sessionManager.snapshot()
+            .filter { it.isInitialized && it.state.value.deletedAt > 0L }
+        conversationRepo.emptyTrash()
+        trashedSessions.forEach { session ->
+            discardQueuedMessages(session)
+            session.replace(newConversation(session.id), existsInDatabase = false) { previous ->
+                previous?.let { filesManager.deleteChatFiles(it.files) }
+            }
+            sessionManager.removeIfIdle(session)
+        }
+    }
+
+    /** 从回收站恢复：清掉删除标记，还停在这个会话上的页面也一并换回 */
+    suspend fun restoreFromTrash(conversation: Conversation) {
+        // 回收站列表给的是不带节点的会话，整条替换前先回库取完整对象
+        val full = if (conversation.messageNodes.isEmpty()) {
+            conversationRepo.getConversationById(conversation.id) ?: conversation
+        } else {
+            conversation
+        }
+        // 库里的副本带着删除标记，内存态必须清掉，否则下一次整份保存会把会话再删回去
+        val restored = full.copy(deletedAt = 0L)
+        val session = sessionManager.getOrCreate(restored.id)
+        session.replace(restored, existsInDatabase = true) {
+            conversationRepo.restoreFromTrash(full)
         }
         sessionManager.removeIfIdle(session)
+    }
+
+    /** 撤销删除。语义已变为从回收站恢复，只为还没迁移的调用方保留。 */
+    @Deprecated("Use restoreFromTrash; kept for callers that have not migrated yet")
+    suspend fun restoreConversation(conversation: Conversation) = restoreFromTrash(conversation)
+
+    /**
+     * 归档：写库后同步内存态，避免下一次整对象保存把归档标记覆盖回未归档。
+     * 归档会顺手取消置顶（与 DAO 一致）。
+     */
+    suspend fun archiveConversation(id: Uuid) {
+        val archivedAt = System.currentTimeMillis()
+        conversationRepo.archiveConversation(id)
+        sessionManager.get(id)?.takeIf { it.isInitialized }?.let { session ->
+            session.updateMetadata(
+                transform = { it.copy(archivedAt = archivedAt, isPinned = false) },
+                persist = {},
+            )
+        }
+    }
+
+    /** 取消归档：同样同步内存态 */
+    suspend fun unarchiveConversation(id: Uuid) {
+        conversationRepo.unarchiveConversation(id)
+        sessionManager.get(id)?.takeIf { it.isInitialized }?.let { session ->
+            session.updateMetadata(
+                transform = { it.copy(archivedAt = 0L) },
+                persist = {},
+            )
+        }
     }
 
     suspend fun deleteConversationsOfAssistant(assistantId: Uuid) {

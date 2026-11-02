@@ -36,7 +36,7 @@ class HistoryVM(
 
     fun deleteConversation(conversation: Conversation) {
         viewModelScope.launch {
-            chatService.deleteConversation(conversation.id)
+            chatService.moveToTrash(conversation.id)
         }
     }
 
@@ -58,7 +58,7 @@ class HistoryVM(
 
     fun restoreConversation(conversation: Conversation) {
         viewModelScope.launch {
-            chatService.restoreConversation(conversation)
+            chatService.restoreFromTrash(conversation)
         }
     }
 
