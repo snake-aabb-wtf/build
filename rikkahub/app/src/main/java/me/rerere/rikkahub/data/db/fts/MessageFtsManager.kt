@@ -155,6 +155,8 @@ class MessageFtsManager(private val database: AppDatabase) {
             FROM message_fts
             JOIN conversationentity AS conversation ON conversation.id = message_fts.conversation_id
             WHERE message_fts.text MATCH ?
+            AND conversation.deleted_at = 0
+            AND conversation.archived_at = 0
             $assistantFilter
             ORDER BY ${sort.orderBy}
             LIMIT 50
