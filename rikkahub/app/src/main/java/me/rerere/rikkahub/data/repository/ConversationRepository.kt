@@ -610,3 +610,9 @@ data class ConversationPageResult(
     val items: List<Conversation>,
     val nextOffset: Int?,
 )
+
+/**
+ * 已进入回收站的行（deletedAt > 0）不能再被普通保存覆盖，否则会复活会话并抹掉消息节点。
+ * 这是最后一道防线：调用方应先驱逐或替换会话。
+ */
+fun shouldSkipTrashedWrite(existingDeletedAt: Long): Boolean = existingDeletedAt > 0L
