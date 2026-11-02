@@ -82,6 +82,14 @@ val deletedAt: Long = 0,
 
 `data/model/Conversation.kt` 增加 `archivedAt: Long = 0`、`deletedAt: Long = 0`。
 
+**写库保护**：`ConversationStore.write()` 现在用 `existsConversationById()` 决定 insert 还是 update。
+软删后行还在，若不处理，页面里的「空会话」一发送消息就会 update 回 `deleted_at = 0`，
+把回收站那条复活并清空消息节点。处理方式：
+
+- 所有删除入口（抽屉、历史页、HTTP DELETE）统一把活跃会话换成**新随机 id 的空会话**并导航过去
+- `ConversationStore.write()` 落库前检查目标行的 `deleted_at`：大于 0 时拒绝整对象更新，
+  改为插入一条新 id 的会话（数据不丢，也不复活旧条目）
+
 ### 4.2 DAO
 
 所有「可见会话」查询加 `deleted_at = 0 AND archived_at = 0`：
@@ -166,6 +174,9 @@ suspend fun emptyTrash()                   // 遍历回收站，逐个永久删�
 
 移动/归档一律走 DAO 的单列 UPDATE，不做整对象写回。
 
+`permanentlyDeleteConversation` 保留原 `deleteConversation` 的全部清理（FTS、行、附件），
+并且只接受 `deleted_at > 0` 的会话，防止绕过回收站直接硬删。
+
 ### 4.5 ChatService
 
 软删除要和内存会话保持一致（现在 `deleteConversation` 已有这套处理）：
@@ -175,15 +186,19 @@ suspend fun emptyTrash()                   // 遍历回收站，逐个永久删�
 - `permanentlyDelete(conversationId)`：现有 `deleteConversation` 的硬删路径
 - `emptyTrash()`：逐个永久删除
 - `archiveConversation` / `unarchiveConversation`：只改数据库；内存会话若存在，同步改内存里的 `archivedAt`，避免下一次保存覆盖
-- `deleteConversationsOfAssistant(assistantId)`：改为**批量移入回收站**，不再硬删（误删助手可恢复）
+- `deleteConversationsOfAssistant(assistantId)`：**保持硬删**，并且按 `assistant_id` 全量删
+  （不经过可见性过滤，归档和回收站里的也一起清掉）。理由：助手被删除后，
+  回收站条目会指向不存在的助手，恢复后无处可去；归档入口也随助手一起消失，
+  这些会话只会变成永远拿不到的孤儿数据。删除助手本身已经是带确认的破坏性操作。
 
 ### 4.6 界面
 
 **抽屉（当前助手）**
 
-- 文件夹 chip 行下方加一行入口：`🗄 已归档  12  ›`，点击进入 `Screen.Archived(assistantId)`
-- 计数来自 `countArchived`，为 0 时仍显示（入口稳定，不做闪现）
-- 底部动作行（助手 / 菜单 / 收藏）增加「回收站」，全局入口，不跟随助手
+- 文件夹 chip 行下方加两行入口：
+  - `🗄 已归档  12  ›` → `Screen.Archived(assistantId)`，计数来自 `countArchived`，为 0 时仍显示
+  - `🗑 回收站  3  ›` → `Screen.Trash`，全局入口，不跟随助手
+- 不放底部动作行：那一行已有助手 / 菜单 / 收藏 / 统计 / 设置 五项，300dp 抽屉再加会很挤
 
 **会话项菜单**
 
@@ -223,9 +238,16 @@ suspend fun emptyTrash()                   // 遍历回收站，逐个永久删�
 
 ### 4.7 与其他功能的交界
 
-- **导出/备份**：导出查询要排除 `deleted_at > 0`，保留归档会话。实现时检查 `data/export` 与 `web/routes/ConversationRoutes.kt`
+- **备份**：`BackupManager` 是整库 `VACUUM INTO` 快照 + 附件目录打包，不是按查询导出。
+  本次**不做过滤**：回收站内容会跟着备份走，恢复备份后回收站原样回来。理由是过滤要在快照副本上
+  删行、清 `message_fts`、剔除只被回收站引用的附件，工作量和风险都不小，而「备份包含回收站」并不丢数据
+- **统计**：`StatsVM.totalMessages` 现在直接 `messageNodeDAO.countAll()`。改为 join 会话表，
+  排除 `deleted_at > 0`；归档会话**计入**（内容还在，只是收起来了）
+- **HTTP API**：`DELETE /api/conversations/{id}` 改为软删（进回收站），
+  新增 `?permanent=true` 走永久删除；`GET /api/conversations/{id}` 对归档/回收站会话仍返回 200
+  （带上 `archivedAt` / `deletedAt`），列表接口则排除它们
 - **收藏**：收藏指向消息节点，会话进回收站后收藏仍存在；永久删除时节点级联消失。本次不特殊处理，记录为已知行为
-- **Web UI / HTTP API**：数据层过滤后自动生效；归档/回收站页面不在本次范围
+- **Web UI**：数据层过滤后自动生效；归档/回收站页面不在本次范围
 - **文件夹**：会话在文件夹内被删除时，`folder_id` 保留，恢复后回到原文件夹
 
 ### 4.8 包名与应用名
