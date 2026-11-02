@@ -123,6 +123,9 @@ class ChatService(
         data object Failed : TurnResult
     }
 
+    /** 已因会话在回收站而跳过落库的 id，只告警一次 */
+    private val warnedTrashedWrites = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     private val conversationStore = object : ConversationStore {
         override suspend fun prepareWrite(): (Conversation) -> Conversation {
             // 会话落库即视为开始，此时把助手的配置固定到会话上
@@ -131,9 +134,11 @@ class ChatService(
         }
 
         override suspend fun write(previous: Conversation?, current: Conversation) {
-            val persistedDeletedAt = conversationRepo.getConversationById(current.id)?.deletedAt
+            val persistedDeletedAt = conversationRepo.getDeletedAtById(current.id)
             if (persistedDeletedAt != null && shouldSkipTrashedWrite(persistedDeletedAt)) {
-                Log.w(TAG, "write: skip trashed conversation ${current.id}")
+                if (warnedTrashedWrites.add(current.id.toString())) {
+                    Log.w(TAG, "write: skip trashed conversation ${current.id}")
+                }
                 return
             }
             if (previous == null && !conversationRepo.existsConversationById(current.id)) {

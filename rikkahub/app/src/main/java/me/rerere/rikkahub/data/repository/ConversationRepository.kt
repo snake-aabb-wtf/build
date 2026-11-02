@@ -300,6 +300,8 @@ class ConversationRepository(
         }
     }
 
+    suspend fun getDeletedAtById(id: Uuid): Long? = conversationDAO.getDeletedAtById(id.toString())
+
     suspend fun existsConversationById(uuid: Uuid): Boolean {
         return conversationDAO.existsById(uuid.toString())
     }
@@ -325,15 +327,23 @@ class ConversationRepository(
     }
 
     suspend fun updateConversation(conversation: Conversation) {
-        database.withTransaction {
-            conversationDAO.update(
-                conversationToConversationEntity(conversation)
-            )
-            // 删除旧的节点，插入新的节点
-            messageNodeDAO.deleteByConversation(conversation.id.toString())
-            saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
+        val written = database.withTransaction {
+            // 事务内复核：读取与写入之间可能有删除落库，此时不能复活该行
+            if ((conversationDAO.getDeletedAtById(conversation.id.toString()) ?: 0L) > 0L) {
+                false
+            } else {
+                conversationDAO.update(
+                    conversationToConversationEntity(conversation)
+                )
+                // 删除旧的节点，插入新的节点
+                messageNodeDAO.deleteByConversation(conversation.id.toString())
+                saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
+                true
+            }
         }
-        messageFtsManager.indexConversation(conversation)
+        if (written) {
+            messageFtsManager.indexConversation(conversation)
+        }
     }
 
     /**
