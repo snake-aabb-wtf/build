@@ -25,6 +25,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
 import me.rerere.rikkahub.ui.pages.stats.StatsVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
+import me.rerere.rikkahub.ui.pages.trash.TrashVM
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
@@ -50,6 +51,13 @@ val viewModelModule = module {
         ArchiveVM(
             assistantId = it.get(),
             conversationRepo = get(),
+            chatService = get(),
+        )
+    }
+    viewModel<TrashVM> {
+        TrashVM(
+            conversationRepo = get(),
+            settingsStore = get(),
             chatService = get(),
         )
     }

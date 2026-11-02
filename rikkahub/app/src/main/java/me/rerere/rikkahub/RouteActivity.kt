@@ -137,6 +137,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
+import me.rerere.rikkahub.ui.pages.trash.TrashPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.utils.CrashHandler
@@ -377,6 +378,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.Archived> { key ->
                                 ArchivePage(key.assistantId)
+                            }
+
+                            entry<Screen.Trash> {
+                                TrashPage()
                             }
 
                             entry<Screen.Favorite> {
@@ -672,6 +677,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class Archived(val assistantId: String) : Screen
+
+    @Serializable
+    data object Trash : Screen
 
     @Serializable
     data object Favorite : Screen
