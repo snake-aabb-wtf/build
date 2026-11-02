@@ -73,6 +73,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      - name: Run unit tests
+        run: ./gradlew :app:testGithubDebugUnitTest --no-daemon --stacktrace
+
       - name: Build
         run: |
           chmod +x gradlew
