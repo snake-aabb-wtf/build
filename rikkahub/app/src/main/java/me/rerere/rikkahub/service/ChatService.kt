@@ -1094,7 +1094,8 @@ class ChatService(
 
     /**
      * 移入回收站：停掉生成后在会话的写锁内标记删除，内存换成一个还没落过库的新会话。
-     * 还停在这个会话上的页面看到的是空会话，之后再发消息会新建记录，不会写回已删除的那条。
+     * 还停在这个会话上的页面看到的是空会话；这个 id 上的后续落库会被回收站守卫拒绝，不会写回已删除的那条。
+     * 因此在用户开始新会话之前，这个页面实际上是只读的。
      */
     suspend fun moveToTrash(conversationId: Uuid) {
         val session = sessionManager.getOrCreate(conversationId)
@@ -1111,6 +1112,12 @@ class ChatService(
 
     /** 永久删除：只接受已在回收站里的会话 */
     suspend fun permanentlyDelete(conversationId: Uuid) {
+        // 可见会话的硬删除不在这里发生：先按库里的删除标记拦下来，仓库的校验仍作为兜底
+        val persistedDeletedAt = conversationRepo.getDeletedAtById(conversationId) ?: 0L
+        if (persistedDeletedAt <= 0L) {
+            Log.w(TAG, "permanentlyDelete: skip visible conversation $conversationId")
+            return
+        }
         val session = sessionManager.getOrCreate(conversationId)
         discardQueuedMessages(session)
         session.replace(newConversation(conversationId), existsInDatabase = false) { previous ->
@@ -1158,29 +1165,33 @@ class ChatService(
     suspend fun restoreConversation(conversation: Conversation) = restoreFromTrash(conversation)
 
     /**
-     * 归档：写库后同步内存态，避免下一次整对象保存把归档标记覆盖回未归档。
+     * 归档：在会话的写锁内改内存并写库，避免下一次整对象保存把归档标记覆盖回未归档。
      * 归档会顺手取消置顶（与 DAO 一致）。
      */
     suspend fun archiveConversation(id: Uuid) {
-        val archivedAt = System.currentTimeMillis()
-        conversationRepo.archiveConversation(id)
-        sessionManager.get(id)?.takeIf { it.isInitialized }?.let { session ->
-            session.updateMetadata(
-                transform = { it.copy(archivedAt = archivedAt, isPinned = false) },
-                persist = {},
-            )
+        val session = sessionManager.get(id)?.takeIf { it.isInitialized }
+        if (session == null) {
+            // 没有加载中的会话就不会有落库，直接写库即可
+            conversationRepo.archiveConversation(id)
+            return
         }
+        session.updateMetadata(
+            transform = { it.copy(archivedAt = System.currentTimeMillis(), isPinned = false) },
+            persist = { conversationRepo.archiveConversation(id) },
+        )
     }
 
-    /** 取消归档：同样同步内存态 */
+    /** 取消归档：同样在写锁内改内存并写库 */
     suspend fun unarchiveConversation(id: Uuid) {
-        conversationRepo.unarchiveConversation(id)
-        sessionManager.get(id)?.takeIf { it.isInitialized }?.let { session ->
-            session.updateMetadata(
-                transform = { it.copy(archivedAt = 0L) },
-                persist = {},
-            )
+        val session = sessionManager.get(id)?.takeIf { it.isInitialized }
+        if (session == null) {
+            conversationRepo.unarchiveConversation(id)
+            return
         }
+        session.updateMetadata(
+            transform = { it.copy(archivedAt = 0L) },
+            persist = { conversationRepo.unarchiveConversation(id) },
+        )
     }
 
     suspend fun deleteConversationsOfAssistant(assistantId: Uuid) {
