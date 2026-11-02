@@ -144,6 +144,9 @@ interface ConversationDAO {
     @Query("SELECT COUNT(*) FROM conversationentity WHERE deleted_at = 0 AND archived_at = 0")
     suspend fun countAll(): Int
 
+    @Query("SELECT COUNT(*) FROM conversationentity WHERE deleted_at = 0")
+    suspend fun countVisible(): Int
+
     @Query("SELECT assistant_id AS assistantId, COUNT(*) AS count FROM conversationentity WHERE deleted_at = 0 AND archived_at = 0 GROUP BY assistant_id")
     suspend fun countByAssistant(): List<AssistantConversationCount>
 

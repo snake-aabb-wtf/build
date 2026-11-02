@@ -209,7 +209,9 @@ data class ConversationDto(
     val folderId: String? = null,
     val createAt: Long,
     val updateAt: Long,
-    val isGenerating: Boolean = false
+    val isGenerating: Boolean = false,
+    val archivedAt: Long? = null,
+    val deletedAt: Long? = null
 )
 
 @Serializable
@@ -354,7 +356,9 @@ fun Conversation.toDto(isGenerating: Boolean = false) = ConversationDto(
     folderId = folderId?.toString(),
     createAt = createAt.toEpochMilli(),
     updateAt = updateAt.toEpochMilli(),
-    isGenerating = isGenerating
+    isGenerating = isGenerating,
+    archivedAt = archivedAt.takeIf { it != 0L },
+    deletedAt = deletedAt.takeIf { it != 0L }
 )
 
 fun MessageNode.toDto() = MessageNodeDto(

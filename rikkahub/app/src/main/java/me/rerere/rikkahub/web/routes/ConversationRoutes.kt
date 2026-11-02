@@ -156,11 +156,33 @@ fun Route.conversationRoutes(
         // DELETE /api/conversations/{id} - Delete conversation
         delete("/{id}") {
             val uuid = call.parameters["id"].toUuid("conversation id")
-            conversationRepo.requireConversation(uuid)
+            val conversation = conversationRepo.getConversationById(uuid)
+                ?: throw NotFoundException("Conversation not found")
 
-            val permanent = call.request.queryParameters["permanent"]?.toBoolean() ?: false
-            if (permanent) chatService.permanentlyDelete(uuid) else chatService.moveToTrash(uuid)
-            call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
+            val permanentParam = call.request.queryParameters["permanent"]
+            val permanent = if (permanentParam == null) false else permanentParam.toBooleanStrictOrNull()
+            if (permanent == null) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    mapOf("status" to "error", "reason" to "invalid permanent flag")
+                )
+                return@delete
+            }
+
+            if (permanent) {
+                // 只有回收站里的会话才能硬删除，否则如实返回冲突而不是假装成功
+                if (conversation.deletedAt <= 0L) {
+                    call.respond(
+                        HttpStatusCode.Conflict,
+                        mapOf("status" to "error", "reason" to "not trashed")
+                    )
+                    return@delete
+                }
+                chatService.permanentlyDelete(uuid)
+            } else {
+                chatService.moveToTrash(uuid)
+            }
+            call.respond(HttpStatusCode.NoContent)
         }
 
         // POST /api/conversations/{id}/pin - Toggle pinned status
