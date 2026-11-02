@@ -52,6 +52,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
 import androidx.paging.compose.collectAsLazyPagingItems
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -113,6 +114,7 @@ fun ChatDrawerContent(
     settings: Settings,
     current: Conversation,
     snackbarHostState: SnackbarHostState,
+    onCloseDrawer: suspend () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -343,19 +345,25 @@ fun ChatDrawerContent(
                     vm.generateTitle(it, true)
                 },
                 onDelete = {
-                    scope.launch {
+                    // 模态抽屉会盖住聊天页的 Snackbar，先收起抽屉再删除，撤销入口才点得到；
+                    // 协程跑在 Activity 级的抽屉 VM 上，删除当前会话后导航也不会中断撤销流程
+                    drawerVm.viewModelScope.launch {
+                        onCloseDrawer()
                         vm.deleteConversation(it).join()
                         conversations.refresh()
-                        // 先弹撤销，避免删除当前会话时导航离开导致 Snackbar 所在的作用域被取消
+                        val deletedCurrent = it.id == current.id
+                        if (deletedCurrent) {
+                            // 先离开被删除的空壳页面，Snackbar 不阻塞导航
+                            navigateToChatPage(navController)
+                        }
                         val result = snackbarHostState.showSnackbar(
                             message = context.getString(R.string.chat_page_moved_to_trash),
                             actionLabel = context.getString(R.string.chat_page_undo),
+                            withDismissAction = true,
                         )
                         if (result == SnackbarResult.ActionPerformed) {
-                            vm.restoreConversation(it).join()
+                            drawerVm.restoreConversationFromTrash(it).join()
                             conversations.refresh()
-                        } else if (it.id == current.id) {
-                            navigateToChatPage(navController)
                         }
                     }
                 },

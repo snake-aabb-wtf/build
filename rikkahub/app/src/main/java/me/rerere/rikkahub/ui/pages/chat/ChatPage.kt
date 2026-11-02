@@ -119,7 +119,8 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     }
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    val snackbarHostState = remember { SnackbarHostState() }
+    // Snackbar 状态由 Activity 级抽屉 VM 持有，删除当前会话并导航后撤销入口仍可显示
+    val snackbarHostState = drawerVm.snackbarHostState
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
 
@@ -207,6 +208,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         vm = vm,
                         settings = setting,
                         snackbarHostState = snackbarHostState,
+                        onCloseDrawer = { drawerState.close() },
                     )
                 }
             ) {
@@ -242,6 +244,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                         vm = vm,
                         settings = setting,
                         snackbarHostState = snackbarHostState,
+                        onCloseDrawer = { drawerState.close() },
                     )
                 }
             ) {

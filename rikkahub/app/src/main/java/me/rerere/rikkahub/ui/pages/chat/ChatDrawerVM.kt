@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import android.app.Application
+import androidx.compose.material3.SnackbarHostState
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -8,6 +9,7 @@ import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import androidx.paging.insertSeparators
 import androidx.paging.map
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -73,6 +75,9 @@ class ChatDrawerVM(
     // 回收站会话数（回收站不区分助手）
     val trashedCount: StateFlow<Int> = conversationRepo.countTrashed()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    // 撤销 Snackbar 归 Activity 级作用域所有：删除当前会话并导航后，Snackbar 仍能挂在新页面上
+    val snackbarHostState = SnackbarHostState()
 
     // 当前助手的记忆库是否正在后台整理；没开记忆的助手即使共用的全局记忆库在整理也不显示
     val memoryDreaming: StateFlow<Boolean> = settingsStore.settingsFlow
@@ -187,6 +192,12 @@ class ChatDrawerVM(
             chatService.moveConversationToFolder(conversationId, folderId)
         }
     }
+
+    /** 删除当前会话后页面已导航离开，撤销恢复必须跑在 Activity 级作用域才不会随 ChatVM 取消 */
+    fun restoreConversationFromTrash(conversation: Conversation): Job =
+        viewModelScope.launch {
+            chatService.restoreFromTrash(conversation)
+        }
 
     private fun Conversation.sortDate(sortOrder: ConversationSortOrder): LocalDate {
         val instant = when (sortOrder) {
