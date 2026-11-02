@@ -19,7 +19,6 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -1105,11 +1104,18 @@ class ChatService(
     }
 
     suspend fun deleteConversationsOfAssistant(assistantId: Uuid) {
-        val persisted = conversationRepo.getConversationsOfAssistant(assistantId).first().map { it.id }
-        val loaded = sessionManager.snapshot()
+        // 助手删除是硬删除：不经过回收站守卫，也不受可见性过滤
+        conversationRepo.permanentlyDeleteAllOfAssistant(assistantId)
+        // 数据库行已全部删除，这里只把还停在内存里的会话换空并清理仅存在于内存的附件
+        sessionManager.snapshot()
             .filter { it.isInitialized && it.state.value.assistantId == assistantId }
-            .map { it.id }
-        (persisted + loaded).distinct().forEach { deleteConversation(it) }
+            .forEach { session ->
+                discardQueuedMessages(session)
+                session.replace(newConversation(session.id), existsInDatabase = false) { previous ->
+                    previous?.let { filesManager.deleteChatFiles(it.files) }
+                }
+                sessionManager.removeIfIdle(session)
+            }
     }
 
     private fun discardQueuedMessages(session: ConversationSession) {

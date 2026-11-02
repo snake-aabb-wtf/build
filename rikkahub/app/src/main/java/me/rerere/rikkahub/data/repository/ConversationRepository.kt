@@ -378,14 +378,19 @@ class ConversationRepository(
     /** 从回收站恢复：清掉删除标记并重建搜索索引 */
     suspend fun restoreFromTrash(conversation: Conversation) {
         conversationDAO.restoreFromTrash(conversation.id.toString())
-        messageFtsManager.indexConversation(conversation.copy(deletedAt = 0, archivedAt = 0))
+        // 回收站列表给的是不带 nodes 的会话，必须回库取完整对象再建索引
+        val restored = getConversationById(conversation.id) ?: return
+        messageFtsManager.indexConversation(restored)
     }
 
     /** 清空回收站：逐个永久删除。附件清理是 IO，不放进外层事务 */
     suspend fun emptyTrash() {
         conversationDAO.getTrashedIds().forEach { id ->
             val uuid = runCatching { Uuid.parse(id) }.getOrNull() ?: return@forEach
-            getConversationById(uuid)?.let { permanentlyDeleteConversation(it) }
+            val conversation = getConversationById(uuid) ?: return@forEach
+            // 快照与删除之间可能已被恢复，跳过而不是让守卫中断整批
+            if (conversation.deletedAt <= 0L) return@forEach
+            permanentlyDeleteConversation(conversation)
         }
     }
 

@@ -168,7 +168,7 @@ interface ConversationDAO {
     @Query("UPDATE conversationentity SET archived_at = :now, is_pinned = 0 WHERE id = :id AND deleted_at = 0")
     suspend fun archive(id: String, now: Long)
 
-    @Query("UPDATE conversationentity SET archived_at = 0 WHERE id = :id")
+    @Query("UPDATE conversationentity SET archived_at = 0 WHERE id = :id AND deleted_at = 0")
     suspend fun unarchive(id: String)
 
     @Query("UPDATE conversationentity SET deleted_at = :now, archived_at = 0, is_pinned = 0 WHERE id = :id")
