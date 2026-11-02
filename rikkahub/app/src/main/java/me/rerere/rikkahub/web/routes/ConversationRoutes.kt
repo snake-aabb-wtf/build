@@ -158,8 +158,9 @@ fun Route.conversationRoutes(
             val uuid = call.parameters["id"].toUuid("conversation id")
             conversationRepo.requireConversation(uuid)
 
-            chatService.deleteConversation(uuid)
-            call.respond(HttpStatusCode.NoContent)
+            val permanent = call.request.queryParameters["permanent"]?.toBoolean() ?: false
+            if (permanent) chatService.permanentlyDelete(uuid) else chatService.moveToTrash(uuid)
+            call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
         }
 
         // POST /api/conversations/{id}/pin - Toggle pinned status

@@ -41,7 +41,11 @@ interface MessageNodeDAO {
     @Query("DELETE FROM message_node WHERE id = :nodeId")
     suspend fun deleteById(nodeId: String)
 
-    // 消息节点数（重新生成的分支不另算）
-    @Query("SELECT COUNT(*) FROM message_node")
-    suspend fun countAll(): Int
+    // 消息节点数（重新生成的分支不另算）；回收站里的会话不计入，归档的仍然计入
+    @Query(
+        "SELECT COUNT(*) FROM message_node mn " +
+            "JOIN conversationentity c ON c.id = mn.conversation_id " +
+            "WHERE c.deleted_at = 0"
+    )
+    suspend fun countVisible(): Int
 }

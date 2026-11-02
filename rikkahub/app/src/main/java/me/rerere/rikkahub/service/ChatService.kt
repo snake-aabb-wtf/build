@@ -1106,10 +1106,6 @@ class ChatService(
         sessionManager.removeIfIdle(session)
     }
 
-    /** 删除会话。语义已变为移入回收站，只为还没迁移的调用方保留。 */
-    @Deprecated("Use moveToTrash; kept for callers that have not migrated yet")
-    suspend fun deleteConversation(conversationId: Uuid) = moveToTrash(conversationId)
-
     /** 永久删除：只接受已在回收站里的会话 */
     suspend fun permanentlyDelete(conversationId: Uuid) {
         // 可见会话的硬删除不在这里发生：先按库里的删除标记拦下来，仓库的校验仍作为兜底

@@ -116,7 +116,7 @@ class StatsVM(
             .toMap()
 
         val totalConversations = conversationDAO.countAll()
-        val totalMessages = messageNodeDAO.countAll()
+        val totalMessages = messageNodeDAO.countVisible()
         val launchCount = settingsStore.launchCountFlow.first()
 
         _stats.value = AppStats(
