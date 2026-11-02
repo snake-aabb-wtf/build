@@ -41,9 +41,8 @@ jobs:
       - name: Verify Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          sdkmanager --version
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          ls "$ANDROID_HOME/platforms" 2>/dev/null || echo "(no platforms yet)"
+          ls "$ANDROID_HOME/build-tools" 2>/dev/null || echo "(no build-tools yet)"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
