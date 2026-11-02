@@ -220,6 +220,10 @@ class ChatService(
         sessionManager.get(conversationId)?.takeIf { it.isInitialized }?.state?.value
             ?: conversationRepo.getConversationById(conversationId)
 
+    /** 持久层是否把该会话标记为已删除（回收站）。用于冷启动/深链进入时复核内存里还没有标记的会话。 */
+    suspend fun isTrashed(conversationId: Uuid): Boolean =
+        (conversationRepo.getDeletedAtById(conversationId) ?: 0L) > 0L
+
     fun getGenerationJobStateFlow(conversationId: Uuid): Flow<Job?> =
         sessionManager.getGenerationJobStateFlow(conversationId)
 
@@ -302,6 +306,8 @@ class ChatService(
     // 引入会话配置之前创建的会话没有固定配置，加载时按助手当前的值补上，之后不再随助手变化。
     private suspend fun loadConversation(conversationId: Uuid): Conversation? {
         val conversation = conversationRepo.getConversationById(conversationId) ?: return null
+        // 回收站里的会话不能当作正常会话打开，否则页面会把内容渲染出来却写不回去
+        if (conversation.deletedAt > 0L) return null
         // settingsFlow 在启动初期还是占位值，固定配置必须基于真实设置
         val bound = conversation.bindConfig(settingsStore.awaitLoaded())
         if (bound !== conversation) conversationRepo.updateConversationConfig(bound)
@@ -1100,7 +1106,11 @@ class ChatService(
     suspend fun moveToTrash(conversationId: Uuid) {
         val session = sessionManager.getOrCreate(conversationId)
         discardQueuedMessages(session)
-        session.replace(newConversation(conversationId), existsInDatabase = false) {
+        // 替换出来的空会话必须带删除标记，页面才能据此离开；也避免它被当成正常会话写回
+        session.replace(
+            newConversation(conversationId).copy(deletedAt = System.currentTimeMillis()),
+            existsInDatabase = false,
+        ) {
             conversationRepo.moveToTrash(conversationId)
         }
         sessionManager.removeIfIdle(session)
@@ -1116,7 +1126,10 @@ class ChatService(
         }
         val session = sessionManager.getOrCreate(conversationId)
         discardQueuedMessages(session)
-        session.replace(newConversation(conversationId), existsInDatabase = false) { previous ->
+        session.replace(
+            newConversation(conversationId).copy(deletedAt = System.currentTimeMillis()),
+            existsInDatabase = false,
+        ) { previous ->
             conversationRepo.getConversationById(conversationId)
                 ?.let { conversationRepo.permanentlyDeleteConversation(it) }
             // 数据库那份不知道只在内存里出现过的附件
@@ -1132,7 +1145,10 @@ class ChatService(
         conversationRepo.emptyTrash()
         trashedSessions.forEach { session ->
             discardQueuedMessages(session)
-            session.replace(newConversation(session.id), existsInDatabase = false) { previous ->
+            session.replace(
+                newConversation(session.id).copy(deletedAt = System.currentTimeMillis()),
+                existsInDatabase = false,
+            ) { previous ->
                 previous?.let { filesManager.deleteChatFiles(it.files) }
             }
             sessionManager.removeIfIdle(session)

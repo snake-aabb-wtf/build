@@ -111,6 +111,20 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val assistant by vm.assistant.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
 
+    // 会话在回收站里：立刻离开这个页面，别让用户对着写不回去的输入框发消息
+    LaunchedEffect(conversation.id, conversation.deletedAt) {
+        if (conversation.deletedAt > 0L) {
+            navigateToChatPage(navController)
+        }
+    }
+
+    // 冷启动/深链进入时内存对象还没有删除标记，向持久层复核一次
+    LaunchedEffect(id) {
+        if (vm.isTrashed()) {
+            navigateToChatPage(navController)
+        }
+    }
+
     // 新会话发出第一条消息前，跟随抽屉当前选中的文件夹（#2133）
     val drawerVm: ChatDrawerVM = koinViewModel(viewModelStoreOwner = LocalContext.current as ComponentActivity)
     val selectedFolderId by drawerVm.selectedFolderId.collectAsStateWithLifecycle()

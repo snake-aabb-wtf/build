@@ -45,7 +45,6 @@ import me.rerere.rikkahub.utils.toLocalDate
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 import java.time.Instant
-import kotlin.uuid.Uuid
 
 @Composable
 fun ArchivePage(assistantId: String) {

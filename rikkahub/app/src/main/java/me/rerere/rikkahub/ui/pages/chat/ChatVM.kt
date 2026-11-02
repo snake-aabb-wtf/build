@@ -65,6 +65,9 @@ class ChatVM(
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
+
+    /** 持久层是否已把该会话放进回收站；内存里的对象在冷启动时可能还没有删除标记 */
+    suspend fun isTrashed(): Boolean = chatService.isTrashed(_conversationId)
     var chatListInitialized by mutableStateOf(false) // 聊天列表是否已经滚动到底部
 
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException

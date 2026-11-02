@@ -109,7 +109,7 @@ interface ConversationDAO {
     @Query("SELECT * FROM conversationentity WHERE is_pinned = 1 AND deleted_at = 0 AND archived_at = 0 ORDER BY update_at DESC")
     fun getPinnedConversations(): Flow<List<ConversationEntity>>
 
-    @Query("UPDATE conversationentity SET is_pinned = :isPinned WHERE id = :id")
+    @Query("UPDATE conversationentity SET is_pinned = :isPinned WHERE id = :id AND deleted_at = 0 AND archived_at = 0")
     suspend fun updatePinStatus(id: String, isPinned: Boolean)
 
     @Query("UPDATE conversationentity SET assistant_id = :assistantId, folder_id = '' WHERE id = :id")
@@ -180,7 +180,7 @@ interface ConversationDAO {
     @Query("UPDATE conversationentity SET deleted_at = :now, archived_at = 0, is_pinned = 0 WHERE id = :id")
     suspend fun moveToTrash(id: String, now: Long)
 
-    @Query("UPDATE conversationentity SET deleted_at = 0 WHERE id = :id")
+    @Query("UPDATE conversationentity SET deleted_at = 0, archived_at = 0 WHERE id = :id")
     suspend fun restoreFromTrash(id: String)
 
     @Query("SELECT id FROM conversationentity WHERE deleted_at > 0")

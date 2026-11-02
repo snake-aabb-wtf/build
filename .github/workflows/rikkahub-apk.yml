@@ -81,6 +81,12 @@ jobs:
           chmod +x gradlew
           ./gradlew ${{ github.event.inputs.gradle_task || ':app:assembleGithubDebug' }} --no-daemon --stacktrace
 
+      - name: Upload Room schemas
+        uses: actions/upload-artifact@v4
+        with:
+          name: room-schemas
+          path: rikkahub/app/schemas
+
       - name: Upload APK
         if: always()
         uses: actions/upload-artifact@v4

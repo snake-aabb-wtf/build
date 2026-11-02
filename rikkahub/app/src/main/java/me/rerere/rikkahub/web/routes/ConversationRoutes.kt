@@ -146,7 +146,8 @@ fun Route.conversationRoutes(
         // GET /api/conversations/{id} - Get single conversation
         get("/{id}") {
             val uuid = call.parameters["id"].toUuid("conversation id")
-            val conversation = chatService.getConversation(uuid)
+            // 读持久层：删除当前会话后内存里只剩空壳，返回内存态会假装会话还在
+            val conversation = conversationRepo.getConversationById(uuid)
                 ?: throw NotFoundException("Conversation not found")
 
             val isGenerating = chatService.getGenerationJobStateFlow(uuid).first() != null

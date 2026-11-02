@@ -336,8 +336,10 @@ class ConversationRepository(
      */
     suspend fun updateConversationIfVisible(conversation: Conversation): Boolean {
         val written = database.withTransaction {
-            // 事务内复核：读取与写入之间可能有删除落库，此时不能复活该行
-            if ((conversationDAO.getDeletedAtById(conversation.id.toString()) ?: 0L) > 0L) {
+            // 事务内复核：读取与写入之间可能有删除落库，此时不能复活该行。
+            // null 表示行已被硬删除，UPDATE 会静默影响 0 行并给不存在的会话插节点。
+            val deletedAt = conversationDAO.getDeletedAtById(conversation.id.toString())
+            if (deletedAt == null || deletedAt > 0L) {
                 false
             } else {
                 conversationDAO.update(
@@ -390,8 +392,9 @@ class ConversationRepository(
 
     /** 软删除：移入回收站，同时把消息从搜索索引里摘掉 */
     suspend fun moveToTrash(id: Uuid) {
-        messageFtsManager.deleteConversation(id.toString())
+        // 先落库删除标记，再摘索引：反过来会在中途被取消时留下可见但搜不到的会话
         conversationDAO.moveToTrash(id.toString(), System.currentTimeMillis())
+        messageFtsManager.deleteConversation(id.toString())
     }
 
     /** 从回收站恢复：清掉删除标记并重建搜索索引 */
