@@ -248,6 +248,10 @@
   <string name="chat_message_tool_search_results_count">%1$d results</string>
   <string name="chat_message_tool_search_web">Search web: %1$s</string>
   <string name="chat_message_tool_submit">Submit</string>
+  <string name="chat_page_archive">Archive</string>
+  <string name="chat_page_archive_empty">No archived conversations for this assistant</string>
+  <string name="chat_page_archived">Archived %1$d</string>
+  <string name="chat_page_archived_title">Archived</string>
   <string name="chat_page_cancel">Cancel</string>
   <string name="chat_page_check_fast_model_settings">Check fast model settings</string>
   <string name="chat_page_clear_all_errors">Clear all</string>
@@ -280,6 +284,7 @@
   <string name="chat_page_menu_image_generation">Image Generation</string>
   <string name="chat_page_message_count">%d messages</string>
   <string name="chat_page_move_to_assistant">Move to Assistant</string>
+  <string name="chat_page_moved_to_trash">Moved to trash</string>
   <string name="chat_page_new_chat">New Chat</string>
   <string name="chat_page_new_message">New message</string>
   <string name="chat_page_nickname_placeholder">Please enter nickname</string>
@@ -289,6 +294,7 @@
   <string name="chat_page_scroll_to_bottom">Scroll to bottom</string>
   <string name="chat_page_search_chats">Search Chats</string>
   <string name="chat_page_today">Today</string>
+  <string name="chat_page_undo">Undo</string>
   <string name="chat_page_yesterday">Yesterday</string>
   <string name="citations_count">%1$d Citations</string>
   <string name="code_block_collapse">Collapse</string>
@@ -1784,4 +1790,13 @@
   <string name="setting_model_page_memory_model">Memory Consolidation Model</string>
   <string name="setting_model_page_memory_model_desc">Model used to organize conversations into long-term memory in the background; uses the fast model when not set</string>
   <string name="setting_model_page_memory_model_follow_fast">Same as fast model</string>
+  <!-- Trash page -->
+  <string name="trash_page_delete_forever">Delete forever</string>
+  <string name="trash_page_delete_forever_confirm">This cannot be undone. Delete this conversation permanently?</string>
+  <string name="trash_page_empty">Trash is empty</string>
+  <string name="trash_page_empty_confirm">Permanently delete everything in the trash?</string>
+  <string name="trash_page_restore">Restore</string>
+  <string name="trash_page_title">Trash %1$d</string>
+  <string name="trash_page_title_plain">Trash</string>
+  <string name="trash_page_unknown_assistant">Unknown assistant</string>
 </resources>
