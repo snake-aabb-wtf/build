@@ -80,6 +80,7 @@ import me.rerere.rikkahub.ui.hooks.readBooleanPreference
 import me.rerere.rikkahub.ui.hooks.readStringPreference
 import me.rerere.rikkahub.ui.hooks.rememberCustomAsrState
 import me.rerere.rikkahub.ui.hooks.rememberCustomTtsState
+import me.rerere.rikkahub.ui.pages.archive.ArchivePage
 import me.rerere.rikkahub.ui.pages.assistant.AssistantPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantBasicPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailPage
@@ -374,6 +375,10 @@ class RouteActivity : ComponentActivity() {
                                 HistoryPage()
                             }
 
+                            entry<Screen.Archived> { key ->
+                                ArchivePage(key.assistantId)
+                            }
+
                             entry<Screen.Favorite> {
                                 FavoritePage()
                             }
@@ -664,6 +669,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object History : Screen
+
+    @Serializable
+    data class Archived(val assistantId: String) : Screen
 
     @Serializable
     data object Favorite : Screen
