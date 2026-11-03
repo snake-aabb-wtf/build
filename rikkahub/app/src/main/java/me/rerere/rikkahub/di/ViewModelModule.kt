@@ -6,6 +6,7 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantDetailVM
 import me.rerere.rikkahub.ui.pages.backup.BackupVM
 import me.rerere.rikkahub.ui.pages.chat.ChatDrawerVM
 import me.rerere.rikkahub.ui.pages.chat.ChatVM
+import me.rerere.rikkahub.ui.pages.comparison.ComparisonVM
 import me.rerere.rikkahub.ui.pages.debug.DebugVM
 import me.rerere.rikkahub.ui.pages.extensions.PromptVM
 import me.rerere.rikkahub.ui.pages.extensions.QuickMessagesVM
@@ -47,6 +48,12 @@ val viewModelModule = module {
     viewModelOf(::SettingVM)
     viewModelOf(::DebugVM)
     viewModelOf(::HistoryVM)
+    viewModel<ComparisonVM> { params ->
+        ComparisonVM(
+            ids = params.get(),
+            conversationRepository = get(),
+        )
+    }
     viewModel<ArchiveVM> {
         ArchiveVM(
             assistantId = it.get(),

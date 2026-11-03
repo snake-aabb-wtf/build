@@ -28,6 +28,25 @@ fun navigateToChatPage(
     )
 }
 
+/** 从二级页面跳回会话时保留返回栈，让用户可以退回来。 */
+fun pushToChatPage(
+    navigator: Navigator,
+    chatId: Uuid,
+    nodeId: Uuid? = null,
+) {
+    Log.i(TAG, "pushToChatPage: navigate to $chatId")
+    navigator.navigate(
+        Screen.Chat(
+            id = chatId.toString(),
+            nodeId = nodeId?.toString(),
+        )
+    )
+}
+
+fun navigateToComparison(navigator: Navigator, ids: List<Uuid>) {
+    navigator.navigate(Screen.Comparison(ids = ids.map { it.toString() }))
+}
+
 fun Context.copyMessageToClipboard(message: UIMessage) {
     this.writeClipboardText(message.toText())
 }

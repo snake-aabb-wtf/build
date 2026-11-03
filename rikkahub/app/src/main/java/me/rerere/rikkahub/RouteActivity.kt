@@ -92,6 +92,7 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantPromptPage
 import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantRequestPage
 import me.rerere.rikkahub.ui.pages.backup.BackupPage
 import me.rerere.rikkahub.ui.pages.chat.ChatPage
+import me.rerere.rikkahub.ui.pages.comparison.ComparisonPage
 import me.rerere.rikkahub.ui.pages.debug.DebugPage
 import me.rerere.rikkahub.ui.pages.extensions.ExtensionsPage
 import me.rerere.rikkahub.ui.pages.extensions.PromptPage
@@ -374,6 +375,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.History> {
                                 HistoryPage()
+                            }
+
+                            entry<Screen.Comparison> { key ->
+                                ComparisonPage(ids = key.ids)
                             }
 
                             entry<Screen.Archived> { key ->
@@ -674,6 +679,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object History : Screen
+
+    @Serializable
+    data class Comparison(val ids: List<String>) : Screen
 
     @Serializable
     data class Archived(val assistantId: String) : Screen
