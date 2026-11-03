@@ -129,7 +129,7 @@ class ComparisonFingerprintTest {
             UIMessagePart.Image("file:///x.png"),
             UIMessagePart.Video("file:///x.mp4"),
             UIMessagePart.Audio("file:///x.mp3"),
-            UIMessagePart.Document("file:///x.pdf"),
+            UIMessagePart.Document(url = "file:///x.pdf", fileName = "x.pdf"),
             UIMessagePart.ToolCall(toolCallId = "c", toolName = "t", arguments = """{"a":1}"""),
             UIMessagePart.ToolResult(
                 toolCallId = "c",

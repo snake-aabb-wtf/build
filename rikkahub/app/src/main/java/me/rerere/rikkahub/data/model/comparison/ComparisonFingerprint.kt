@@ -38,9 +38,8 @@ internal suspend fun messageFingerprint(message: UIMessage, fileHasher: FileHash
 }
 
 /** 每段先写长度，避免不同切分拼出同一个字符串。 */
-private fun StringBuilder.segment(value: String): StringBuilder {
+private fun StringBuilder.segment(value: String): StringBuilder =
     append(value.length).append('\u0000').append(value).append('\u0000')
-}
 
 @Suppress("DEPRECATION")
 private suspend fun partFingerprint(part: UIMessagePart, fileHasher: FileHasher): String {
@@ -123,14 +122,25 @@ private suspend fun JsonElement.canonicalString(
     hashUrls: Boolean,
 ): String {
     return when (this) {
-        is JsonObject -> entries
-            .sortedBy { it.key }
-            .joinToString(separator = ",", prefix = "{", postfix = "}") { (key, value) ->
-                JsonPrimitive(key).toString() + ":" + value.canonicalString(fileHasher, hashUrls)
+        is JsonObject -> {
+            val builder = StringBuilder("{")
+            val sorted = entries.sortedBy { it.key }
+            for (index in sorted.indices) {
+                if (index > 0) builder.append(',')
+                val (key, value) = sorted[index]
+                builder.append(JsonPrimitive(key).toString()).append(':')
+                builder.append(value.canonicalString(fileHasher, hashUrls))
             }
+            builder.append('}').toString()
+        }
 
-        is JsonArray -> joinToString(separator = ",", prefix = "[", postfix = "]") {
-            it.canonicalString(fileHasher, hashUrls)
+        is JsonArray -> {
+            val builder = StringBuilder("[")
+            for (index in indices) {
+                if (index > 0) builder.append(',')
+                builder.append(this[index].canonicalString(fileHasher, hashUrls))
+            }
+            builder.append(']').toString()
         }
 
         is JsonPrimitive -> if (hashUrls && isString && content.startsWith("file://")) {
