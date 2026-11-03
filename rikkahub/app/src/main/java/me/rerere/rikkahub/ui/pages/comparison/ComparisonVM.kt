@@ -218,7 +218,10 @@ class ComparisonVM(
     fun syncWithCandidates(candidates: List<ComparisonCandidate>) {
         if (candidates.isEmpty() || order.isEmpty()) return
         if (_state.value.loading || _state.value.cancelled) return
-        if (buildJob?.isActive == true || syncJob?.isActive == true) return
+        if (buildJob?.isActive == true) return
+        // 新一轮触发（候选列表重新发射 / 再次回到前台）以最新一次为准：上一次读到的可能还是
+        // 聊天页保存前的数据，直接丢弃比跳过更安全
+        syncJob?.cancel()
         val requested = order.toList()
         val byId = candidates.associateBy { it.id }
         val token = generation
