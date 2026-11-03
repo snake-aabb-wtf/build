@@ -3,7 +3,6 @@ package me.rerere.rikkahub.ui.pages.comparison.views
 import kotlinx.coroutines.test.runTest
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.FileHasher
 import me.rerere.rikkahub.data.model.comparison.LayoutPoint
 import me.rerere.rikkahub.data.model.comparison.buildComparisonGraph
@@ -63,16 +62,18 @@ class ComparisonVisibilityTest {
 
     @Test
     fun `linear compression threshold is strict at two hundred`() = runTest {
-        suspend fun chain(count: Int): ComparisonGraph = buildComparisonGraph(
-            listOf(conversation("A", *Array(count) { index -> "m$index" })),
+        val atThresholdGraph = buildComparisonGraph(
+            listOf(conversation("A", *Array(200) { index -> "m$index" })),
             noFiles,
         )
-
-        val atThreshold = linearCompression(chain(200), expanded = emptySet())
+        val atThreshold = linearCompression(atThresholdGraph, expanded = emptySet())
         assertTrue(atThreshold.hidden.isEmpty())
         assertTrue(atThreshold.anchors.isEmpty())
 
-        val over200 = chain(201)
+        val over200 = buildComparisonGraph(
+            listOf(conversation("A", *Array(201) { index -> "m$index" })),
+            noFiles,
+        )
         val over = linearCompression(over200, expanded = emptySet())
         assertEquals(191, over.hidden.size)
         assertEquals(
