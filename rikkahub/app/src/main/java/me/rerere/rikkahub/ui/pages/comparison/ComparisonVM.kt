@@ -158,10 +158,10 @@ class ComparisonVM(
         val deletedAt = runCatching { conversationRepository.getDeletedAtById(id) }
             .getOrElse { return true }
         if (deletedAt == 0L) return true
-        if (order.remove(id)) {
-            loaded.remove(id)
-            rebuild()
-        }
+        // 已经在别处移出过就不再重复提示
+        if (!order.remove(id)) return false
+        loaded.remove(id)
+        rebuild()
         _events.trySend(ComparisonEvent.ConversationsMissing(1))
         return false
     }
