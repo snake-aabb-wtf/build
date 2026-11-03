@@ -1,23 +1,117 @@
 package me.rerere.rikkahub.data.model.comparison
 
+import me.rerere.rikkahub.data.model.Conversation
+import java.time.Instant
 import kotlin.uuid.Uuid
 
 /** 少于两个会话的对比没有意义。 */
 const val COMPARISON_MIN_CONVERSATIONS = 2
 
+/** 一次对比最多容纳的会话数，再多屏幕和选择器都排不下。 */
+const val COMPARISON_MAX_CONVERSATIONS = 8
+
 /** 超过这个节点数时提示用户缩进树视图仍会显示全部内容。 */
 const val LARGE_COMPARISON_NODE_THRESHOLD = 2000
 
-/** 多选开关：已选则取消，未选则加入。 */
-fun toggleComparisonSelection(selected: Set<Uuid>, id: Uuid): Set<Uuid> =
-    if (id in selected) selected - id else selected + id
+/** 选择器里的一条候选会话；[updateAt] 用来判断从聊天页返回后是否需要重建。 */
+data class ComparisonCandidate(
+    val id: Uuid,
+    val title: String,
+    val updateAt: Instant,
+)
+
+/** 多选开关：已选则取消，未选则加入；到上限后不再加入。 */
+fun toggleComparisonSelection(
+    selected: Set<Uuid>,
+    id: Uuid,
+    limit: Int = COMPARISON_MAX_CONVERSATIONS,
+): Set<Uuid> = when {
+    id in selected -> selected - id
+    selected.size >= limit -> selected
+    else -> selected + id
+}
 
 /** 选中数量够不够开始对比。 */
 fun canCompare(selected: Set<Uuid>): Boolean = selected.size >= COMPARISON_MIN_CONVERSATIONS
 
+/** 还能不能再加一个会话（已在选择里、或已到上限时都不行）。 */
+fun canAddConversation(
+    selected: Set<Uuid>,
+    id: Uuid,
+    limit: Int = COMPARISON_MAX_CONVERSATIONS,
+): Boolean = id !in selected && selected.size < limit
+
+/**
+ * 选择器实际列出的会话：只列还没进对比的，最多补到上限。
+ *
+ * 已在对比里的会话在上方 chip 里显示，不在弹层里重复出现；没有空位时弹层为空。
+ */
+fun availableCandidates(
+    candidates: List<ComparisonCandidate>,
+    selected: Set<Uuid>,
+    limit: Int = COMPARISON_MAX_CONVERSATIONS,
+): List<ComparisonCandidate> {
+    val slots = (limit - selected.size).coerceAtLeast(0)
+    if (slots == 0) return emptyList()
+    return candidates
+        .asSequence()
+        .filter { it.id !in selected }
+        .distinctBy { it.id }
+        .take(slots)
+        .toList()
+}
+
 /** 图大到画布/时间线一次铺不开，但仍允许查看（缩进树不折叠）。 */
 fun isLargeComparison(graph: ComparisonGraph): Boolean =
     graph.nodeCount > LARGE_COMPARISON_NODE_THRESHOLD
+
+/**
+ * 读会话的结果分类。
+ *
+ * 只有「查询成功但返回 null」才是 [ConversationLoad.Missing]；读库抛异常是
+ * [ConversationLoad.Unavailable]，不能把选择当成不存在删掉。
+ */
+sealed interface ConversationLoad {
+    data class Loaded(val conversation: Conversation) : ConversationLoad
+    data object Missing : ConversationLoad
+    data object Unavailable : ConversationLoad
+}
+
+fun conversationLoad(conversation: Conversation?): ConversationLoad =
+    if (conversation == null) ConversationLoad.Missing else ConversationLoad.Loaded(conversation)
+
+/** 需要从对比里移出：不存在，或已经在回收站；读库失败要保留选择。 */
+fun ConversationLoad.shouldDrop(): Boolean = when (this) {
+    ConversationLoad.Missing -> true
+    ConversationLoad.Unavailable -> false
+    is ConversationLoad.Loaded -> conversation.deletedAt > 0
+}
+
+/**
+ * 多条会话是否完全没有共同开头。
+ *
+ * 只看非空会话（有可选消息节点的）的首个节点：少于两条、首节点重合、或至少两条共用同一个根时都不提示；
+ * 空会话不参与分母，避免「2 条无关会话 + 1 条空会话」被误判成没有问题。
+ */
+fun hasNoCommonStart(
+    conversations: List<Conversation>,
+    graph: ComparisonGraph,
+): Boolean {
+    val starts = conversations.mapNotNull { conversation ->
+        conversation.messageNodes
+            .firstOrNull { node -> node.messages.getOrNull(node.selectIndex) != null }
+            ?.id
+    }
+    if (starts.size < COMPARISON_MIN_CONVERSATIONS) return false
+    // 同一个 messageNode 被重复传进来时不算分叉
+    if (starts.toSet().size != starts.size) return false
+    return graph.rootIds.size == starts.size
+}
+
+/** 会话被移出对比后清掉它的指纹缓存，避免 Map 随着选择历史无限增长。 */
+fun MutableMap<Pair<Uuid, Uuid>, String>.forgetConversation(id: Uuid) {
+    keys.removeAll { it.first == id }
+}
 
 /**
  * 展开一个折叠节点时把整棵子树一起标记为已展开。

@@ -57,6 +57,11 @@ private class MutableNode(
 suspend fun buildComparisonGraph(
     conversations: List<Conversation>,
     fileHasher: FileHasher,
+    /**
+     * 跨重建复用的消息指纹缓存，键是 (会话 id, 消息 id)。消息重新生成或切换分支会换新 id，
+     * 自然失效；这里只省掉重复的 JSON 规范化与附件哈希，不改变合并结果。
+     */
+    fingerprints: MutableMap<Pair<Uuid, Uuid>, String>? = null,
 ): ComparisonGraph {
     val nodes = LinkedHashMap<String, MutableNode>()
     val rootIds = mutableListOf<String>()
@@ -68,7 +73,9 @@ suspend fun buildComparisonGraph(
 
         for (messageNode in conversation.messageNodes) {
             val message = messageNode.messages.getOrNull(messageNode.selectIndex) ?: continue
-            val fingerprint = messageFingerprint(message, fileHasher)
+            val cacheKey = conversation.id to message.id
+            val fingerprint = fingerprints?.get(cacheKey)
+                ?: messageFingerprint(message, fileHasher).also { fingerprints?.put(cacheKey, it) }
             val occurrence = NodeOccurrence(
                 conversationId = conversation.id,
                 conversationTitle = conversation.title,

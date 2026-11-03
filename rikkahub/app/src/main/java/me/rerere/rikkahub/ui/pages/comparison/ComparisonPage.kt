@@ -28,8 +28,10 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,9 +41,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
@@ -49,9 +55,11 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.model.comparison.COMPARISON_MAX_CONVERSATIONS
 import me.rerere.rikkahub.data.model.comparison.COMPARISON_MIN_CONVERSATIONS
 import me.rerere.rikkahub.data.model.comparison.ComparisonNode
 import me.rerere.rikkahub.data.model.comparison.NodeOccurrence
+import me.rerere.rikkahub.data.model.comparison.availableCandidates
 import me.rerere.rikkahub.data.model.comparison.conversationEndpoints
 import me.rerere.rikkahub.data.model.comparison.isLargeComparison
 import me.rerere.rikkahub.data.model.comparison.sourceOccurrences
@@ -97,8 +105,21 @@ fun ComparisonPage(
                 is ComparisonEvent.ConversationsMissing -> snackbarHostState.showSnackbar(
                     context.getString(R.string.comparison_missing, event.count)
                 )
+
+                ComparisonEvent.SelectionLimitReached -> snackbarHostState.showSnackbar(
+                    context.getString(R.string.comparison_limit, COMPARISON_MAX_CONVERSATIONS)
+                )
             }
         }
+    }
+
+    // 从聊天页返回（或应用回到前台）时，只重建 updateAt 变了的会话
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        vm.syncWithCandidates(vm.candidates.value)
+    }
+    // 返回瞬间候选列表可能还没重新发射，等它到齐再对一次 updateAt
+    LaunchedEffect(candidates) {
+        vm.syncWithCandidates(candidates)
     }
 
     fun openOccurrence(occurrence: NodeOccurrence) {
@@ -118,9 +139,7 @@ fun ComparisonPage(
         }
     }
 
-    val selectedIds = remember(state.conversations) {
-        state.conversations.map { it.id }.toSet()
-    }
+    val selectedIds = state.selectedIds
 
     Scaffold(
         snackbarHost = {
@@ -167,15 +186,14 @@ fun ComparisonPage(
             ComparisonToolbar(
                 conversations = state.conversations,
                 viewMode = state.viewMode,
+                enabled = !state.loading,
+                canAdd = state.selectedIds.size < COMPARISON_MAX_CONVERSATIONS,
                 onViewModeChange = vm::setViewMode,
                 onRemove = vm::removeConversation,
                 onAdd = onAddConversations ?: { showPicker = true },
             )
             val graph = state.graph
-            if (graph != null &&
-                state.conversations.size > 1 &&
-                graph.rootIds.size == state.conversations.size
-            ) {
+            if (graph != null && state.noCommonStart) {
                 // 各自从不同的第一条消息开始：不合并，提示一下免得看起来像画错了
                 Text(
                     text = stringResource(R.string.comparison_no_common_prefix),
@@ -196,6 +214,7 @@ fun ComparisonPage(
             ComparisonContent(
                 state = state,
                 metrics = metrics,
+                onCancelLoading = vm::cancelLoading,
                 onExpand = vm::expand,
                 onNodeClick = handleNodeClick,
                 onCanvasViewportChange = vm::setCanvasViewport,
@@ -208,9 +227,13 @@ fun ComparisonPage(
     }
 
     if (showPicker) {
+        val options = remember(candidates, selectedIds) {
+            availableCandidates(candidates, selectedIds)
+        }
         ComparisonPickerSheet(
-            conversations = candidates,
+            conversations = options,
             selected = selectedIds,
+            enabled = !state.loading,
             onToggle = { id ->
                 if (id in selectedIds) vm.removeConversation(id) else vm.addConversation(id)
             },
@@ -277,6 +300,8 @@ private fun OccurrencePickerSheet(
 private fun ComparisonToolbar(
     conversations: List<ComparisonConversationSummary>,
     viewMode: ComparisonViewMode,
+    enabled: Boolean,
+    canAdd: Boolean,
     onViewModeChange: (ComparisonViewMode) -> Unit,
     onRemove: (Uuid) -> Unit,
     onAdd: (() -> Unit)?,
@@ -315,12 +340,12 @@ private fun ComparisonToolbar(
                             contentDescription = stringResource(R.string.comparison_remove),
                             modifier = Modifier
                                 .size(16.dp)
-                                .clickable { onRemove(summary.id) },
+                                .clickable(enabled = enabled) { onRemove(summary.id) },
                         )
                     },
                 )
             }
-            if (onAdd != null) {
+            if (onAdd != null && canAdd) {
                 AssistChip(
                     onClick = onAdd,
                     label = { Text(stringResource(R.string.comparison_add)) },
@@ -354,6 +379,7 @@ private fun ComparisonToolbar(
 private fun ComparisonContent(
     state: ComparisonUiState,
     metrics: ComparisonMetrics,
+    onCancelLoading: () -> Unit,
     onExpand: (String) -> Unit,
     onNodeClick: (ComparisonNode) -> Unit,
     onCanvasViewportChange: (ComparisonViewport) -> Unit,
@@ -364,12 +390,19 @@ private fun ComparisonContent(
     when {
         graph == null && state.loading -> ComparisonLoading(
             hashing = state.hashing,
+            loadedCount = state.loadedCount,
+            totalCount = state.totalCount,
+            onCancel = onCancelLoading,
             modifier = modifier,
         )
 
         graph == null -> ComparisonPlaceholder(
             text = stringResource(
-                if (state.failed) R.string.comparison_failed else R.string.comparison_empty
+                when {
+                    state.failed -> R.string.comparison_failed
+                    state.cancelled -> R.string.comparison_cancelled
+                    else -> R.string.comparison_empty
+                }
             ),
             modifier = modifier,
         )
@@ -402,19 +435,24 @@ private fun ComparisonContent(
                         modifier = modifier,
                     )
 
-                    ComparisonViewMode.CANVAS -> CanvasTreeView(
-                        graph = graph,
-                        layout = tidy,
-                        sizes = sizes,
-                        endpointIds = endpoints,
-                        expanded = state.expanded,
-                        viewport = state.canvasViewport,
-                        onViewportChange = onCanvasViewportChange,
-                        onExpand = onExpand,
-                        onNodeClick = onNodeClick,
-                        metrics = metrics,
-                        modifier = modifier,
-                    )
+                    // 画布/时间线按像素 offset 定位，RTL 会把偏移镜像到屏幕外；内部固定 LTR
+                    ComparisonViewMode.CANVAS -> CompositionLocalProvider(
+                        LocalLayoutDirection provides LayoutDirection.Ltr
+                    ) {
+                        CanvasTreeView(
+                            graph = graph,
+                            layout = tidy,
+                            sizes = sizes,
+                            endpointIds = endpoints,
+                            expanded = state.expanded,
+                            viewport = state.canvasViewport,
+                            onViewportChange = onCanvasViewportChange,
+                            onExpand = onExpand,
+                            onNodeClick = onNodeClick,
+                            metrics = metrics,
+                            modifier = modifier,
+                        )
+                    }
 
                     ComparisonViewMode.TIMELINE -> {
                         val timeline = remember(graph, metrics) {
@@ -424,19 +462,23 @@ private fun ComparisonContent(
                                 metrics.timelineLaneHeight.value,
                             )
                         }
-                        TimelineView(
-                            graph = graph,
-                            layout = timeline,
-                            sizes = sizes,
-                            endpointIds = endpoints,
-                            expanded = state.expanded,
-                            viewport = state.timelineViewport,
-                            onViewportChange = onTimelineViewportChange,
-                            onExpand = onExpand,
-                            onNodeClick = onNodeClick,
-                            metrics = metrics,
-                            modifier = modifier,
-                        )
+                        CompositionLocalProvider(
+                            LocalLayoutDirection provides LayoutDirection.Ltr
+                        ) {
+                            TimelineView(
+                                graph = graph,
+                                layout = timeline,
+                                sizes = sizes,
+                                endpointIds = endpoints,
+                                expanded = state.expanded,
+                                viewport = state.timelineViewport,
+                                onViewportChange = onTimelineViewportChange,
+                                onExpand = onExpand,
+                                onNodeClick = onNodeClick,
+                                metrics = metrics,
+                                modifier = modifier,
+                            )
+                        }
                     }
                 }
             }
@@ -447,6 +489,9 @@ private fun ComparisonContent(
 @Composable
 private fun ComparisonLoading(
     hashing: Boolean,
+    loadedCount: Int,
+    totalCount: Int,
+    onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -459,12 +504,22 @@ private fun ComparisonLoading(
         ) {
             CircularProgressIndicator()
             Text(
-                text = stringResource(
-                    if (hashing) R.string.comparison_hashing else R.string.comparison_loading
-                ),
+                text = when {
+                    hashing -> stringResource(R.string.comparison_hashing)
+                    totalCount > 0 -> stringResource(
+                        R.string.comparison_loading_progress,
+                        loadedCount,
+                        totalCount,
+                    )
+
+                    else -> stringResource(R.string.comparison_loading)
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            TextButton(onClick = onCancel) {
+                Text(stringResource(R.string.comparison_cancel))
+            }
         }
     }
 }

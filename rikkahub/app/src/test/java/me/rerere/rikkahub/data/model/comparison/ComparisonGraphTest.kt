@@ -1,7 +1,9 @@
 package me.rerere.rikkahub.data.model.comparison
 
 import kotlinx.coroutines.test.runTest
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.toMessageNode
@@ -64,6 +66,43 @@ class ComparisonGraphTest {
         assertNotEquals(leaves[0].id, leaves[1].id)
         assertNotEquals(leaves[0].parentId, leaves[1].parentId)
         assertTrue(leaves.all { it.occurrences.size == 1 })
+    }
+
+    @Test
+    fun `fingerprint cache is reused and invalidated by a new message id`() = runTest {
+        val hasher = object : FileHasher {
+            var calls = 0
+            override suspend fun hash(url: String): String? {
+                calls += 1
+                return "bytes"
+            }
+        }
+        val cache = HashMap<Pair<Uuid, Uuid>, String>()
+        val message = UIMessage(
+            role = MessageRole.USER,
+            parts = listOf(UIMessagePart.Image("file:///a.png")),
+        )
+        val conversation = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(message.toMessageNode()),
+        )
+
+        buildComparisonGraph(listOf(conversation), hasher, cache)
+        assertEquals(1, hasher.calls)
+
+        // 同一个 (会话, 消息) 再建一次图：直接命中缓存
+        buildComparisonGraph(listOf(conversation), hasher, cache)
+        assertEquals(1, hasher.calls)
+
+        // 重新生成后消息 id 变了，缓存必须失效
+        val regenerated = conversation.copy(
+            messageNodes = listOf(message.copy(id = Uuid.random()).toMessageNode()),
+        )
+        buildComparisonGraph(listOf(regenerated), hasher, cache)
+        assertEquals(2, hasher.calls)
+
+        cache.forgetConversation(conversation.id)
+        assertTrue(cache.keys.none { it.first == conversation.id })
     }
 
     @Test

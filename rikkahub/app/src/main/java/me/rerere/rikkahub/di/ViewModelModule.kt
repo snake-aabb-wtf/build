@@ -53,6 +53,7 @@ val viewModelModule = module {
             ids = params.get(),
             conversationRepository = get(),
             settingsStore = get(),
+            savedStateHandle = get(),
         )
     }
     viewModel<ArchiveVM> {

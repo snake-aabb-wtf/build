@@ -8,6 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 import kotlin.uuid.Uuid
 
 class ComparisonInteractionsTest {
@@ -29,6 +30,72 @@ class ComparisonInteractionsTest {
 
         val removed = toggleComparisonSelection(added, id)
         assertTrue(removed.isEmpty())
+    }
+
+    @Test
+    fun `selection stops at the cap and frees a slot when removed`() {
+        val full = (1..COMPARISON_MAX_CONVERSATIONS).map { Uuid.random() }.toSet()
+        val extra = Uuid.random()
+
+        assertEquals(full, toggleComparisonSelection(full, extra))
+        assertFalse(canAddConversation(full, extra))
+        assertTrue(canAddConversation(toggleComparisonSelection(full, full.first()), extra))
+        assertFalse(canAddConversation(setOf(Uuid.random()), Uuid.random(), limit = 1))
+    }
+
+    @Test
+    fun `picker lists only unselected conversations up to the remaining slots`() {
+        val candidates = (1..10).map { index ->
+            ComparisonCandidate(Uuid.random(), "c$index", Instant.EPOCH)
+        }
+        val selected = candidates.take(6).map { it.id }.toSet()
+
+        val available = availableCandidates(candidates, selected)
+
+        assertEquals(2, available.size)
+        assertTrue(available.none { it.id in selected })
+        assertEquals(candidates.drop(6).take(2).map { it.id }, available.map { it.id })
+        assertEquals(
+            emptyList<ComparisonCandidate>(),
+            availableCandidates(candidates, candidates.take(8).map { it.id }.toSet()),
+        )
+    }
+
+    @Test
+    fun `only a successful null lookup counts as missing`() {
+        assertTrue(conversationLoad(null).shouldDrop())
+        assertTrue(conversationLoad(conversation("trashed", "hi").copy(deletedAt = 1L)).shouldDrop())
+        assertFalse(conversationLoad(conversation("alive", "hi")).shouldDrop())
+        // 读库失败不能把用户的选择当成已删除
+        assertFalse(ConversationLoad.Unavailable.shouldDrop())
+    }
+
+    @Test
+    fun `no common start ignores empty conversations in the denominator`() = runTest {
+        val a = conversation("A", "from a")
+        val b = conversation("B", "from b")
+        val empty = Conversation(
+            assistantId = Uuid.random(),
+            title = "empty",
+            messageNodes = emptyList(),
+        )
+
+        val graph = buildComparisonGraph(listOf(a, b, empty), noFiles)
+
+        assertTrue(hasNoCommonStart(listOf(a, b, empty), graph))
+        assertFalse(hasNoCommonStart(listOf(a, a.copy()), graph))
+        assertFalse(hasNoCommonStart(listOf(a, empty), graph))
+    }
+
+    @Test
+    fun `shared first message is not reported as no common start`() = runTest {
+        val a = conversation("A", "hi", "from a")
+        val b = conversation("B", "hi", "from b")
+
+        val graph = buildComparisonGraph(listOf(a, b), noFiles)
+
+        assertEquals(1, graph.rootIds.size)
+        assertFalse(hasNoCommonStart(listOf(a, b), graph))
     }
 
     @Test

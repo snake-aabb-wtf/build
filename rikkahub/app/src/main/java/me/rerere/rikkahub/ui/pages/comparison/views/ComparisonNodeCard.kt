@@ -356,13 +356,16 @@ fun comparisonRoleLabel(role: MessageRole): String = when (role) {
 @Composable
 fun comparisonNodeText(node: ComparisonNode): String {
     val message = node.message
-    val text = message.toText().trim()
+    // toText() 会拼接全部 part；视口每帧重组时不能在组合里重算
+    val text = remember(message) { message.toText().trim() }
     if (text.isNotEmpty()) return text
 
-    val reasoning = message.parts
-        .filterIsInstance<UIMessagePart.Reasoning>()
-        .map { it.reasoning.trim() }
-        .firstOrNull { it.isNotEmpty() }
+    val reasoning = remember(message) {
+        message.parts
+            .filterIsInstance<UIMessagePart.Reasoning>()
+            .map { it.reasoning.trim() }
+            .firstOrNull { it.isNotEmpty() }
+    }
     if (reasoning != null) return reasoning
 
     val part = message.parts.firstOrNull { it !is UIMessagePart.Text }

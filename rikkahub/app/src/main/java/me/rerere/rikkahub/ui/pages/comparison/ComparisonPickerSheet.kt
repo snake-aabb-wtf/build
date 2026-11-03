@@ -21,6 +21,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.model.comparison.ComparisonCandidate
 import kotlin.uuid.Uuid
 
 /**
@@ -32,6 +33,7 @@ import kotlin.uuid.Uuid
 fun ComparisonPickerSheet(
     conversations: List<ComparisonCandidate>,
     selected: Set<Uuid>,
+    enabled: Boolean = true,
     onToggle: (Uuid) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -77,7 +79,9 @@ fun ComparisonPickerSheet(
                             trailingContent = {
                                 Checkbox(checked = checked, onCheckedChange = null)
                             },
-                            modifier = Modifier.clickable { onToggle(conversation.id) },
+                            modifier = Modifier.clickable(enabled = enabled) {
+                                onToggle(conversation.id)
+                            },
                         )
                     }
                 }

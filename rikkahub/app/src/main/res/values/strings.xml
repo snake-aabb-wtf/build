@@ -1808,6 +1808,10 @@
   <string name="comparison_refresh">Rebuild comparison</string>
   <string name="comparison_loading">Building comparison…</string>
   <string name="comparison_hashing">Reading local attachments…</string>
+  <string name="comparison_loading_progress">Loading %1$d/%2$d conversations…</string>
+  <string name="comparison_cancel">Cancel</string>
+  <string name="comparison_cancelled">Comparison build cancelled</string>
+  <string name="comparison_limit">You can compare at most %1$d conversations</string>
   <string name="comparison_empty">Nothing to compare yet</string>
   <string name="comparison_failed">Failed to build the comparison</string>
   <string name="comparison_no_common_prefix">These conversations do not have a common start</string>
