@@ -63,7 +63,7 @@ class ComparisonVisibilityTest {
 
     @Test
     fun `linear compression threshold is strict at two hundred`() = runTest {
-        fun chain(count: Int): ComparisonGraph = buildComparisonGraph(
+        suspend fun chain(count: Int): ComparisonGraph = buildComparisonGraph(
             listOf(conversation("A", *Array(count) { index -> "m$index" })),
             noFiles,
         )
