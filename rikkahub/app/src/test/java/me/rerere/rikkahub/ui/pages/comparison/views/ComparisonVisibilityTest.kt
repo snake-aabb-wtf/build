@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.comparison.views
 import kotlinx.coroutines.test.runTest
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.FileHasher
 import me.rerere.rikkahub.data.model.comparison.LayoutPoint
 import me.rerere.rikkahub.data.model.comparison.buildComparisonGraph
@@ -33,6 +34,65 @@ class ComparisonVisibilityTest {
 
         assertTrue(folded.isEmpty())
         assertEquals(graph.nodes.size, visible.size)
+    }
+
+    @Test
+    fun `linear compression keeps the first and last five nodes`() = runTest {
+        val graph = buildComparisonGraph(
+            listOf(conversation("A", *Array(400) { index -> "message $index" })),
+            noFiles,
+        )
+
+        val compression = linearCompression(graph, expanded = emptySet())
+
+        assertEquals(1, compression.anchors.size)
+        assertEquals(390, compression.hidden.size)
+        val visible = visibleNodeIds(graph, emptySet(), compression.hidden)
+        assertEquals(10, visible.size)
+        assertTrue(compression.hidden.none { it in visible })
+
+        val byDepth = graph.nodes.values.sortedBy { it.depth }
+        byDepth.take(5).forEach { node -> assertTrue(node.id in visible) }
+        byDepth.takeLast(5).forEach { node -> assertTrue(node.id in visible) }
+        byDepth.subList(5, 395).forEach { node -> assertFalse(node.id in visible) }
+
+        // chip 锚点是中段第一颗节点
+        assertEquals(byDepth[5].id, compression.anchors.keys.single())
+        assertEquals(390, compression.anchors.values.single())
+    }
+
+    @Test
+    fun `linear compression threshold is strict at two hundred`() = runTest {
+        fun chain(count: Int): ComparisonGraph = buildComparisonGraph(
+            listOf(conversation("A", *Array(count) { index -> "m$index" })),
+            noFiles,
+        )
+
+        val atThreshold = linearCompression(chain(200), expanded = emptySet())
+        assertTrue(atThreshold.hidden.isEmpty())
+        assertTrue(atThreshold.anchors.isEmpty())
+
+        val over200 = chain(201)
+        val over = linearCompression(over200, expanded = emptySet())
+        assertEquals(191, over.hidden.size)
+        assertEquals(
+            10,
+            visibleNodeIds(graph = over200, folded = emptySet(), hidden = over.hidden).size,
+        )
+    }
+
+    @Test
+    fun `expanding a segment restores the whole run`() = runTest {
+        val graph = buildComparisonGraph(
+            listOf(conversation("A", *Array(400) { index -> "message $index" })),
+            noFiles,
+        )
+        val anchor = linearCompression(graph, emptySet()).anchors.keys.single()
+
+        val compression = linearCompression(graph, expanded = setOf(linearSegmentKey(anchor)))
+
+        assertTrue(compression.hidden.isEmpty())
+        assertEquals(graph.nodes.size, visibleNodeIds(graph, emptySet(), compression.hidden).size)
     }
 
     @Test

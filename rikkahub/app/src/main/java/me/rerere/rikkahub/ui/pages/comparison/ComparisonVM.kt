@@ -24,7 +24,6 @@ import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.comparison.COMPARISON_MAX_CONVERSATIONS
 import me.rerere.rikkahub.data.model.comparison.ComparisonCandidate
 import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.ConversationLoad
@@ -35,6 +34,9 @@ import me.rerere.rikkahub.data.model.comparison.canAddConversation
 import me.rerere.rikkahub.data.model.comparison.conversationLoad
 import me.rerere.rikkahub.data.model.comparison.expandedWithSubtree
 import me.rerere.rikkahub.data.model.comparison.hasNoCommonStart
+import me.rerere.rikkahub.data.model.comparison.restoreComparisonIds
+import me.rerere.rikkahub.ui.pages.comparison.views.LINEAR_SEGMENT_PREFIX
+import me.rerere.rikkahub.ui.pages.comparison.views.linearSegmentKey
 import me.rerere.rikkahub.data.model.comparison.shouldDrop
 import me.rerere.rikkahub.data.model.localFileUrls
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -72,6 +74,13 @@ data class ComparisonUiState(
     val canvasViewport: ComparisonViewport = ComparisonViewport(),
     /** 时间线视图的平移（scale 恒为 1）。 */
     val timelineViewport: ComparisonViewport = ComparisonViewport(),
+    /** 缩进树的位置：切到别的视图再回来时复用，不再回顶。 */
+    val indentFirstIndex: Int = 0,
+    val indentOffset: Int = 0,
+    val indentScrollX: Int = 0,
+    /** 画布/时间线是否已经做过首次 fit；重建图后复位。 */
+    val canvasFitted: Boolean = false,
+    val timelineFitted: Boolean = false,
     /** 加载进度：已读完的会话数 / 本次请求的会话数。 */
     val loadedCount: Int = 0,
     val totalCount: Int = 0,
@@ -90,6 +99,9 @@ sealed interface ComparisonEvent {
 
     /** 选择数量已达到上限。 */
     data object SelectionLimitReached : ComparisonEvent
+
+    /** 要跳转的消息节点在会话里已经不存在。 */
+    data object MessageMissing : ComparisonEvent
 }
 
 /**
@@ -120,7 +132,21 @@ class ComparisonVM(
     private var generation = 0
 
     private val _state = MutableStateFlow(
-        ComparisonUiState(viewMode = restoreViewMode())
+        ComparisonUiState(
+            viewMode = restoreViewMode(),
+            indentFirstIndex = savedStateHandle.get<Int>(KEY_INDENT_INDEX) ?: 0,
+            indentOffset = savedStateHandle.get<Int>(KEY_INDENT_OFFSET) ?: 0,
+            indentScrollX = savedStateHandle.get<Int>(KEY_INDENT_SCROLL_X) ?: 0,
+            canvasViewport = restoreViewport(KEY_CANVAS_SCALE, KEY_CANVAS_PAN_X, KEY_CANVAS_PAN_Y),
+            timelineViewport = restoreViewport(
+                KEY_TIMELINE_SCALE,
+                KEY_TIMELINE_PAN_X,
+                KEY_TIMELINE_PAN_Y,
+            ),
+            expanded = restoreExpanded(),
+            canvasFitted = savedStateHandle.get<Boolean>(KEY_CANVAS_FITTED) ?: false,
+            timelineFitted = savedStateHandle.get<Boolean>(KEY_TIMELINE_FITTED) ?: false,
+        )
     )
     val state: StateFlow<ComparisonUiState> = _state.asStateFlow()
 
@@ -179,11 +205,53 @@ class ComparisonVM(
     }
 
     fun setCanvasViewport(viewport: ComparisonViewport) {
-        _state.update { if (it.canvasViewport == viewport) it else it.copy(canvasViewport = viewport) }
+        if (_state.value.canvasViewport == viewport) return
+        savedStateHandle[KEY_CANVAS_SCALE] = viewport.scale
+        savedStateHandle[KEY_CANVAS_PAN_X] = viewport.panX
+        savedStateHandle[KEY_CANVAS_PAN_Y] = viewport.panY
+        _state.update { it.copy(canvasViewport = viewport) }
     }
 
     fun setTimelineViewport(viewport: ComparisonViewport) {
-        _state.update { if (it.timelineViewport == viewport) it else it.copy(timelineViewport = viewport) }
+        if (_state.value.timelineViewport == viewport) return
+        savedStateHandle[KEY_TIMELINE_SCALE] = viewport.scale
+        savedStateHandle[KEY_TIMELINE_PAN_X] = viewport.panX
+        savedStateHandle[KEY_TIMELINE_PAN_Y] = viewport.panY
+        _state.update { it.copy(timelineViewport = viewport) }
+    }
+
+    /** 缩进树的滚动位置：切换视图、进程重建后都从原处继续。 */
+    fun setIndentPosition(firstVisibleIndex: Int, offset: Int, scrollX: Int) {
+        val current = _state.value
+        if (current.indentFirstIndex == firstVisibleIndex &&
+            current.indentOffset == offset &&
+            current.indentScrollX == scrollX
+        ) {
+            return
+        }
+        savedStateHandle[KEY_INDENT_INDEX] = firstVisibleIndex
+        savedStateHandle[KEY_INDENT_OFFSET] = offset
+        savedStateHandle[KEY_INDENT_SCROLL_X] = scrollX
+        _state.update {
+            it.copy(
+                indentFirstIndex = firstVisibleIndex,
+                indentOffset = offset,
+                indentScrollX = scrollX,
+            )
+        }
+    }
+
+    /** 画布首次 fit 完成；之后切换视图不再重新 fit，保留用户的缩放/平移。 */
+    fun markCanvasFitted() {
+        if (_state.value.canvasFitted) return
+        savedStateHandle[KEY_CANVAS_FITTED] = true
+        _state.update { it.copy(canvasFitted = true) }
+    }
+
+    fun markTimelineFitted() {
+        if (_state.value.timelineFitted) return
+        savedStateHandle[KEY_TIMELINE_FITTED] = true
+        _state.update { it.copy(timelineFitted = true) }
     }
 
     /**
@@ -191,14 +259,25 @@ class ComparisonVM(
      * 再次点击只收起这个节点，后代留在已展开集合里，重新展开时直接可见。
      */
     fun expand(id: String) {
+        val graph = _state.value.graph ?: return
         _state.update { state ->
             if (id in state.expanded) {
                 state.copy(expanded = state.expanded - id)
             } else {
-                val graph = state.graph ?: return@update state
                 state.copy(expanded = expandedWithSubtree(graph, state.expanded, id))
             }
         }
+        persistExpanded(_state.value.expanded)
+    }
+
+    /**
+     * 展开线性长链被压缩的中段：只恢复这一段，不连带展开后续分叉。
+     */
+    fun expandSegment(id: String) {
+        val key = linearSegmentKey(id)
+        if (key in _state.value.expanded) return
+        _state.update { it.copy(expanded = it.expanded + key) }
+        persistExpanded(_state.value.expanded)
     }
 
     /** 重新读一遍所有会话：会话可能在外部被改过（编辑、重新生成）。 */
@@ -256,7 +335,11 @@ class ComparisonVM(
                         is ConversationLoad.Loaded -> outcome.conversation
                         else -> continue
                     }
-                    if (conversation.deletedAt > 0) continue
+                    // 归档与删除同待遇：交给 rebuild 移出并提示
+                    if (conversation.deletedAt > 0 || conversation.archivedAt > 0) {
+                        reload += id
+                        continue
+                    }
                     val previous = signatureSnapshot[id] ?: branchSignature(cached)
                     if (branchSignature(conversation) != previous) {
                         reload += id
@@ -296,27 +379,37 @@ class ComparisonVM(
     }
 
     /**
-     * 跳转前确认会话还在。停留期间被删掉的会话从选择里移出并通知界面。
+     * 跳转前确认会话和消息节点都还在。
      *
-     * @return 会话仍存在时为 true，可以安全跳转
+     * 会话已删/已归档时从选择里移出并提示；节点在聊天页被删掉时 `index = -1`，不能静默不滚，
+     * 所以单独提示「消息已不存在」并且不导航。
+     *
+     * @return 可以安全跳转时为 true
      */
-    suspend fun verifyConversation(id: Uuid): Boolean {
-        // 只查删除标记，不把整条会话读回内存；读库异常时按存在处理，避免误删选择
-        val deletedAt = try {
-            conversationRepository.getDeletedAtById(id)
+    suspend fun verifyOccurrence(conversationId: Uuid, messageNodeId: Uuid): Boolean {
+        // 只在点击时读一次整条会话；读库异常按存在处理，避免误删选择
+        val conversation = try {
+            conversationRepository.getConversationById(conversationId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             return true
         }
-        if (deletedAt == 0L) return true
-        // 已经在别处移出过就不再重复提示
-        if (!order.remove(id)) return false
-        forget(id)
-        persistIds()
-        rebuild()
-        _events.trySend(ComparisonEvent.ConversationsMissing(1))
-        return false
+        if (conversation == null || conversation.deletedAt > 0 || conversation.archivedAt > 0) {
+            // 已经在别处移出过就不再重复提示
+            if (order.remove(conversationId)) {
+                forget(conversationId)
+                persistIds()
+                rebuild()
+                _events.trySend(ComparisonEvent.ConversationsMissing(1))
+            }
+            return false
+        }
+        if (conversation.messageNodes.none { it.id == messageNodeId }) {
+            _events.trySend(ComparisonEvent.MessageMissing)
+            return false
+        }
+        return true
     }
 
     private fun rebuild(reload: Set<Uuid> = emptySet()) {
@@ -338,8 +431,12 @@ class ComparisonVM(
                 missingCount = 0,
                 noCommonStart = false,
                 selectedIds = requested.toSet(),
+                canvasFitted = false,
+                timelineFitted = false,
             )
         }
+        savedStateHandle[KEY_CANVAS_FITTED] = false
+        savedStateHandle[KEY_TIMELINE_FITTED] = false
 
         buildJob = viewModelScope.launch {
             val conversations = ArrayList<Conversation>(requested.size)
@@ -463,7 +560,10 @@ class ComparisonVM(
                     expanded = if (graph == null) {
                         emptySet()
                     } else {
-                        state.expanded.filter { it in graph.nodes }.toSet()
+                        // 线性中段标记不指向节点，不能按节点 id 过滤掉
+                        state.expanded.filter {
+                            it in graph.nodes || it.startsWith(LINEAR_SEGMENT_PREFIX)
+                        }.toSet()
                     },
                     loadedCount = requested.size,
                     totalCount = requested.size,
@@ -483,14 +583,14 @@ class ComparisonVM(
         savedStateHandle[KEY_IDS] = ArrayList(order.map { it.toString() })
     }
 
-    private fun restoreIds(fallback: List<String>): List<Uuid> {
-        val saved = savedStateHandle.get<ArrayList<String>>(KEY_IDS)
-        val source = saved?.takeIf { it.isNotEmpty() } ?: fallback
-        return source
-            .mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }
-            .distinct()
-            .take(COMPARISON_MAX_CONVERSATIONS)
-    }
+    /**
+     * 恢复选择：区分「没存过」和「存的是空列表」。
+     *
+     * 删除到 0 个后重建页面必须保持空态；用 `takeIf { isNotEmpty() }` 会退回路由里的原始 ids，
+     * 把用户删掉的会话又「复活」。
+     */
+    private fun restoreIds(fallback: List<String>): List<Uuid> =
+        restoreComparisonIds(savedStateHandle.get<ArrayList<String>>(KEY_IDS), fallback)
 
     private fun restoreViewMode(): ComparisonViewMode {
         val saved = savedStateHandle.get<String>(KEY_VIEW_MODE)
@@ -498,9 +598,35 @@ class ComparisonVM(
             ?: ComparisonViewMode.INDENTED
     }
 
+    private fun restoreViewport(scaleKey: String, panXKey: String, panYKey: String): ComparisonViewport =
+        ComparisonViewport(
+            scale = savedStateHandle.get<Float>(scaleKey) ?: 1f,
+            panX = savedStateHandle.get<Float>(panXKey) ?: 0f,
+            panY = savedStateHandle.get<Float>(panYKey) ?: 0f,
+        )
+
+    private fun persistExpanded(expanded: Set<String>) {
+        savedStateHandle[KEY_EXPANDED] = ArrayList(expanded)
+    }
+
+    private fun restoreExpanded(): Set<String> =
+        savedStateHandle.get<ArrayList<String>>(KEY_EXPANDED)?.toSet() ?: emptySet()
+
     private companion object {
         const val KEY_IDS = "comparison_ids"
         const val KEY_VIEW_MODE = "comparison_view_mode"
+        const val KEY_EXPANDED = "comparison_expanded"
+        const val KEY_INDENT_INDEX = "comparison_indent_index"
+        const val KEY_INDENT_OFFSET = "comparison_indent_offset"
+        const val KEY_INDENT_SCROLL_X = "comparison_indent_scroll_x"
+        const val KEY_CANVAS_SCALE = "comparison_canvas_scale"
+        const val KEY_CANVAS_PAN_X = "comparison_canvas_pan_x"
+        const val KEY_CANVAS_PAN_Y = "comparison_canvas_pan_y"
+        const val KEY_CANVAS_FITTED = "comparison_canvas_fitted"
+        const val KEY_TIMELINE_SCALE = "comparison_timeline_scale"
+        const val KEY_TIMELINE_PAN_X = "comparison_timeline_pan_x"
+        const val KEY_TIMELINE_PAN_Y = "comparison_timeline_pan_y"
+        const val KEY_TIMELINE_FITTED = "comparison_timeline_fitted"
     }
 }
 

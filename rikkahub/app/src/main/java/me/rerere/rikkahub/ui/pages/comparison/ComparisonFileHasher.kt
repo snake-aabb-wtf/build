@@ -42,13 +42,8 @@ class ComparisonFileHasher : FileHasher {
             )
             cached(key)?.let { return@withContext it.hash }
 
-            // 大文件按 (大小, 修改时间) 判断，不整份读完：比较结果依旧稳定，也不会卡住加载
-            if (length > MAX_HASH_BYTES) {
-                val statHash = "stat:$length:${key.lastModified}"
-                put(key, statHash)
-                return@withContext statHash
-            }
-
+            // 不论大小都按内容哈希：大小/修改时间只是缓存键，不能冒充内容哈希，否则两个
+            // 不同文件可能因为在同一毫秒被写成同样大小而被误合并。大文件只影响耗时。
             val hash = try {
                 file.sha256()
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -74,16 +69,18 @@ class ComparisonFileHasher : FileHasher {
 
     private companion object {
         const val MAX_CACHE_ENTRIES = 512
-        const val MAX_HASH_BYTES = 32L * 1024 * 1024
     }
 }
+
+/** 8KB 读缓冲：大文件也不会一次读进内存。 */
+private const val HASH_BUFFER_SIZE = 8 * 1024
 
 private suspend fun File.sha256(): String {
     val digest = MessageDigest.getInstance("SHA-256")
     inputStream().use { input ->
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        val buffer = ByteArray(HASH_BUFFER_SIZE)
         while (true) {
-            // 大文件（<=32MB）也能在页面退出时立刻停下
+            // 每个分块都检查取消：几 GB 的附件也能在页面退出时立刻停下
             currentCoroutineContext().ensureActive()
             val read = input.read(buffer)
             if (read <= 0) break

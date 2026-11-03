@@ -42,6 +42,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,6 +51,7 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.comparison.COMPARISON_MAX_CONVERSATIONS
 import me.rerere.rikkahub.data.model.comparison.canCompare
 import me.rerere.rikkahub.data.model.comparison.toggleComparisonSelection
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -65,6 +67,7 @@ import kotlin.uuid.Uuid
 @Composable
 fun HistoryPage(vm: HistoryVM = koinViewModel()) {
     val navController = LocalNavController.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
@@ -84,7 +87,17 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
     }
 
     fun toggleSelection(id: Uuid) {
-        selectedIds = toggleComparisonSelection(selectedIds, id)
+        val next = toggleComparisonSelection(selectedIds, id)
+        // 到上限时选择不变：明确告诉用户为什么点不动
+        if (next == selectedIds && id !in selectedIds) {
+            scope.launch {
+                snackbarHostState.showSnackbar(
+                    context.getString(R.string.comparison_limit, COMPARISON_MAX_CONVERSATIONS)
+                )
+            }
+            return
+        }
+        selectedIds = next
     }
 
     BackHandler(enabled = selectionMode) {

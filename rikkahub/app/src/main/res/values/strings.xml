@@ -1815,14 +1815,14 @@
   <string name="comparison_empty">Nothing to compare yet</string>
   <string name="comparison_failed">Failed to build the comparison</string>
   <string name="comparison_no_common_prefix">These conversations do not have a common start</string>
-  <string name="comparison_missing">Removed %1$d conversations that no longer exist</string>
+  <string name="comparison_missing">Removed %1$d deleted or archived conversations</string>
   <string name="comparison_remove">Remove from comparison</string>
   <string name="comparison_add">Add</string>
   <string name="comparison_untitled">Untitled</string>
   <string name="comparison_no_messages">No messages</string>
   <string name="comparison_endpoint">End</string>
   <string name="comparison_fork">Fork</string>
-  <string name="comparison_shared_by">Shared by %1$d</string>
+  <string name="comparison_shared_by">Shared by %1$d conversations</string>
   <string name="comparison_fold_more">+%1$d more</string>
   <string name="comparison_expand_text">Show full message</string>
   <string name="comparison_collapse_text">Show less</string>
@@ -1846,8 +1846,15 @@
   <string name="comparison_compare_action">Compare branches</string>
   <string name="comparison_select_hint">Pick at least 2 conversations</string>
   <string name="comparison_choose_source">Choose a source conversation</string>
-  <string name="comparison_large_graph">Large comparison: Tree view shows every message</string>
+  <string name="comparison_large_graph">Large graph — switch to Tree to see everything</string>
   <string name="comparison_need_two">Select at least 2 conversations to compare</string>
   <string name="comparison_picker_title">Add conversations</string>
   <string name="comparison_picker_empty">No conversations available</string>
+  <string name="comparison_explainer">Literal comparison: messages merge only when content is identical — no similarity matching</string>
+  <string name="comparison_endpoint_here">%1$s ends here</string>
+  <string name="comparison_endpoint_many">%1$d conversations end here</string>
+  <string name="comparison_endpoint_list_title">Conversations ending here</string>
+  <string name="comparison_message_missing">This message no longer exists</string>
+  <string name="comparison_more_chips">%1$d more</string>
+  <string name="comparison_linear_more">… %1$d messages</string>
 </resources>

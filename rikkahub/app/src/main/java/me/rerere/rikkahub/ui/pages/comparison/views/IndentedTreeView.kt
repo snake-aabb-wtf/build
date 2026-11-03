@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.comparison.views
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,11 +10,15 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -67,9 +72,31 @@ fun IndentedTreeView(
     modifier: Modifier = Modifier,
     @Suppress("UNUSED_PARAMETER") expanded: Set<String> = emptySet(),
     @Suppress("UNUSED_PARAMETER") onExpand: (String) -> Unit = {},
+    endpointTitles: Map<String, List<String>> = emptyMap(),
+    onEndpointClick: (ComparisonNode) -> Unit = {},
+    /** 首次组合时恢复的滚动位置；由页面状态传入，切视图回来不再回顶。 */
+    firstVisibleIndex: Int = 0,
+    firstVisibleOffset: Int = 0,
+    horizontalScroll: Int = 0,
+    onPositionChange: (firstIndex: Int, offset: Int, scrollX: Int) -> Unit = { _, _, _ -> },
 ) {
     val rows = remember(graph) { buildRows(graph) }
-    val scrollState = rememberScrollState()
+    // 不用 rememberSaveable：滚动位置由 VM 统一持有，避免保存状态和页面恢复互相覆盖
+    val scrollState = remember { ScrollState(horizontalScroll) }
+    val listState = remember { LazyListState(firstVisibleIndex, firstVisibleOffset) }
+    val latestOnPosition by rememberUpdatedState(onPositionChange)
+    // 三处位置一起上报；切到画布/时间线再回来时由 VM 里的快照恢复
+    LaunchedEffect(listState, scrollState) {
+        snapshotFlow {
+            Triple(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                scrollState.value,
+            )
+        }.collect { (index, offset, scrollX) ->
+            latestOnPosition(index, offset, scrollX)
+        }
+    }
     val connectorColor = MaterialTheme.colorScheme.outlineVariant
     val maxVisualDepth = remember(rows) {
         rows.maxOfOrNull { min(it.depth, MaxVisibleIndent) } ?: 0
@@ -84,6 +111,7 @@ fun IndentedTreeView(
             .horizontalScroll(scrollState)
     ) {
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .width(contentWidth)
                 .fillMaxSize(),
@@ -94,7 +122,9 @@ fun IndentedTreeView(
                     row = row,
                     metrics = metrics,
                     endpoint = row.node.id in endpointIds,
+                    endpointTitles = endpointTitles[row.node.id].orEmpty(),
                     connectorColor = connectorColor,
+                    onEndpointClick = { onEndpointClick(row.node) },
                     onClick = { onNodeClick(row.node) },
                 )
             }
@@ -107,7 +137,9 @@ private fun TreeRowItem(
     row: TreeRow,
     metrics: ComparisonMetrics,
     endpoint: Boolean,
+    endpointTitles: List<String>,
     connectorColor: Color,
+    onEndpointClick: () -> Unit,
     onClick: () -> Unit,
 ) {
     val density = LocalDensity.current
@@ -135,6 +167,8 @@ private fun TreeRowItem(
             expandable = true,
             depth = if (row.depth > MaxVisibleIndent) row.depth else null,
             minHeight = metrics.cardHeight,
+            endpointTitles = endpointTitles,
+            onEndpointClick = if (endpointTitles.size > 1) onEndpointClick else null,
             modifier = Modifier
                 .offset { IntOffset(indentPx, 0) }
                 .padding(vertical = 4.dp)

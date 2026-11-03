@@ -1,15 +1,19 @@
 package me.rerere.rikkahub.ui.pages.comparison.views
 
 import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
+import me.rerere.rikkahub.data.model.comparison.ComparisonNode
 import me.rerere.rikkahub.data.model.comparison.LayoutPoint
+import me.rerere.rikkahub.data.model.comparison.conversationEndpointTitles
 import me.rerere.rikkahub.ui.pages.comparison.ComparisonViewport
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * 折叠阈值：子树大于这个节点数、且本身是分叉点的节点，在画布/时间线里先收成 `+N` 占位。
  *
- * 线性链永不折叠：1000 条消息的单链没有可省的视觉分支，折叠只会把整棵树藏起来。
+ * 线性链不做整棵子树折叠：1000 条消息的单链没有可省的视觉分支。超长单链只在
+ * [linearCompression] 里压缩中段，首尾仍可读。
  */
 internal const val FOLD_SUBTREE_THRESHOLD = 300
 
@@ -34,18 +38,89 @@ internal fun foldHiddenCount(sizes: Map<String, Int>, id: String): Int =
  * 折叠后仍然可见的节点：折叠节点自身照常绘制，它的后代不画。
  *
  * 折叠的只是「子树」，不是这个节点本身——之前的实现把节点一起藏了，首屏只剩一个 `+999`。
+ *
+ * @param hidden 线性长链中段被压缩掉的节点；它们本身不画，但子链必须继续遍历，
+ * 否则末 5 条也会一起消失。
  */
-internal fun visibleNodeIds(graph: ComparisonGraph, folded: Set<String>): Set<String> {
+internal fun visibleNodeIds(
+    graph: ComparisonGraph,
+    folded: Set<String>,
+    hidden: Set<String> = emptySet(),
+): Set<String> {
     val visible = HashSet<String>(graph.nodes.size)
     val stack = ArrayDeque<String>()
     graph.rootIds.forEach { stack.addLast(it) }
     while (stack.isNotEmpty()) {
         val id = stack.removeLast()
+        if (id in hidden) {
+            graph.nodes[id]?.childIds?.forEach { stack.addLast(it) }
+            continue
+        }
         if (!visible.add(id)) continue
         if (id in folded) continue
         graph.nodes[id]?.childIds?.forEach { stack.addLast(it) }
     }
     return visible
+}
+
+/** 线性长链的压缩阈值：超过 200 个连续单子节点才压中段。 */
+internal const val LINEAR_RUN_THRESHOLD = 200
+
+/** 压缩后保留的首尾节点数。 */
+internal const val LINEAR_RUN_HEAD = 5
+internal const val LINEAR_RUN_TAIL = 5
+
+/** 线性中段展开标记的前缀：和分叉子树展开共用 `expanded`，但不会互相影响。 */
+internal const val LINEAR_SEGMENT_PREFIX = "linear:"
+
+internal fun linearSegmentKey(anchorId: String): String = LINEAR_SEGMENT_PREFIX + anchorId
+
+/**
+ * 线性长链的压缩结果。
+ *
+ * @property hidden 被藏起来的中段节点
+ * @property anchors 中段 chip 的锚点（第一颗被藏起来的节点 id）→ 被藏条数
+ */
+internal data class LinearCompression(
+    val hidden: Set<String>,
+    val anchors: Map<String, Int>,
+)
+
+/**
+ * 把超过 [LINEAR_RUN_THRESHOLD] 的连续线性节点中段压成一颗 chip。
+ *
+ * 只在「每个节点都只有一个子节点」的链上动刀：分叉、分支点本身以及首 5 / 末 5 条照常显示。
+ * 点击 chip 时把锚点放进 `expanded`，整段恢复。
+ */
+internal fun linearCompression(
+    graph: ComparisonGraph,
+    expanded: Set<String>,
+): LinearCompression {
+    val hidden = HashSet<String>()
+    val anchors = LinkedHashMap<String, Int>()
+
+    graph.nodes.values.forEach { node ->
+        // 只从链首开始扫：父节点存在且只有一个子节点时，本节点属于上一条链
+        val parent = node.parentId?.let { graph.nodes[it] }
+        if (parent != null && parent.childIds.size == 1) return@forEach
+
+        val run = ArrayList<String>()
+        var cursor: ComparisonNode? = node
+        while (cursor != null) {
+            run += cursor.id
+            if (cursor.childIds.size != 1) break
+            cursor = graph.nodes[cursor.childIds.single()]
+        }
+
+        if (run.size <= LINEAR_RUN_THRESHOLD) return@forEach
+        val anchorId = run[LINEAR_RUN_HEAD]
+        if (linearSegmentKey(anchorId) in expanded) return@forEach
+        val middle = run.subList(LINEAR_RUN_HEAD, run.size - LINEAR_RUN_TAIL)
+        hidden += middle
+        anchors[anchorId] = middle.size
+    }
+
+    return LinearCompression(hidden = hidden, anchors = anchors)
 }
 
 /** 世界坐标（dp）里的一块矩形，视图裁剪用。 */
@@ -228,21 +303,51 @@ internal fun fitPan(contentPx: Float, viewportPx: Float, startPx: Float = 0f): F
 internal fun clampPanAxis(value: Float, contentPx: Float, viewportPx: Float): Float =
     clampPan(value = value, startPx = 0f, endPx = contentPx, viewportPx = viewportPx)
 
-/** 时间线泳道的短标题：该 lane 的叶子节点所属会话。 */
+/**
+ * 每条泳道里的全部会话标题（去重，保持出现顺序）。
+ *
+ * 以「会话终点所在的节点」归属泳道：一条会话可能提前停在分叉前，按叶子归属会把它算错。
+ */
+internal fun laneConversationTitles(
+    graph: ComparisonGraph,
+    points: Map<String, LayoutPoint>,
+    laneHeight: Float,
+    laneCount: Int,
+): List<List<String>> {
+    if (laneCount <= 0 || laneHeight <= 0f) return emptyList()
+    val lanes = MutableList(laneCount) { LinkedHashSet<String>() }
+
+    fun laneOf(point: LayoutPoint): Int =
+        (point.y / laneHeight).roundToInt().coerceIn(0, laneCount - 1)
+
+    conversationEndpointTitles(graph).forEach { (nodeId, names) ->
+        val point = points[nodeId] ?: return@forEach
+        lanes[laneOf(point)].addAll(names)
+    }
+    // 理论上每条 lane 都有终点；空 lane 用该位置的叶子兜底，标题列不留空
+    graph.nodes.values.forEach { node ->
+        if (node.childIds.isNotEmpty()) return@forEach
+        val point = points[node.id] ?: return@forEach
+        val lane = laneOf(point)
+        if (lanes[lane].isEmpty()) {
+            node.occurrences.forEach { occurrence -> lanes[lane] += occurrence.conversationTitle }
+        }
+    }
+    return lanes.map { it.toList() }
+}
+
+/** 泳道标题：1 个直接显示，2 个用 ` · ` 连接，更多只留前 2 个加 `+N`。 */
+internal fun laneTitleText(titles: List<String>): String = when {
+    titles.isEmpty() -> ""
+    titles.size <= 2 -> titles.joinToString(" · ")
+    else -> titles.take(2).joinToString(" · ") + " +" + (titles.size - 2)
+}
+
+/** 时间线泳道的短标题：该 lane 的所有会话，超过 2 个收成 `A · B +N`。 */
 internal fun laneTitles(
     graph: ComparisonGraph,
     points: Map<String, LayoutPoint>,
     laneHeight: Float,
     laneCount: Int,
-): List<String> {
-    if (laneCount <= 0 || laneHeight <= 0f) return emptyList()
-    val titles = MutableList(laneCount) { "" }
-    graph.nodes.values.forEach { node ->
-        if (node.childIds.isNotEmpty()) return@forEach
-        val point = points[node.id] ?: return@forEach
-        val lane = (point.y / laneHeight).toInt()
-        if (lane !in titles.indices || titles[lane].isNotEmpty()) return@forEach
-        titles[lane] = node.occurrences.firstOrNull()?.conversationTitle.orEmpty()
-    }
-    return titles
-}
+): List<String> =
+    laneConversationTitles(graph, points, laneHeight, laneCount).map(::laneTitleText)

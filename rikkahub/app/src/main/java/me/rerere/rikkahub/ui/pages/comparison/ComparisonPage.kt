@@ -38,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,10 +60,11 @@ import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.comparison.COMPARISON_MAX_CONVERSATIONS
 import me.rerere.rikkahub.data.model.comparison.COMPARISON_MIN_CONVERSATIONS
+import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.ComparisonNode
 import me.rerere.rikkahub.data.model.comparison.NodeOccurrence
 import me.rerere.rikkahub.data.model.comparison.availableCandidates
-import me.rerere.rikkahub.data.model.comparison.conversationEndpoints
+import me.rerere.rikkahub.data.model.comparison.conversationEndpointTitles
 import me.rerere.rikkahub.data.model.comparison.isLargeComparison
 import me.rerere.rikkahub.data.model.comparison.sourceOccurrences
 import me.rerere.rikkahub.data.model.comparison.subtreeSizes
@@ -99,6 +101,7 @@ fun ComparisonPage(
 
     var showPicker by remember { mutableStateOf(false) }
     var occurrenceNode by remember { mutableStateOf<ComparisonNode?>(null) }
+    var endpointSheetTitles by remember { mutableStateOf<List<String>?>(null) }
     val metrics = remember { ComparisonMetrics() }
 
     LaunchedEffect(vm) {
@@ -110,6 +113,10 @@ fun ComparisonPage(
 
                 ComparisonEvent.SelectionLimitReached -> snackbarHostState.showSnackbar(
                     context.getString(R.string.comparison_limit, COMPARISON_MAX_CONVERSATIONS)
+                )
+
+                ComparisonEvent.MessageMissing -> snackbarHostState.showSnackbar(
+                    context.getString(R.string.comparison_message_missing)
                 )
             }
         }
@@ -136,7 +143,8 @@ fun ComparisonPage(
 
     fun openOccurrence(occurrence: NodeOccurrence) {
         scope.launch {
-            if (vm.verifyConversation(occurrence.conversationId)) {
+            // 会话不在或节点在聊天页被删掉时由 VM 发事件提示，这里不导航
+            if (vm.verifyOccurrence(occurrence.conversationId, occurrence.messageNodeId)) {
                 pushToChatPage(navController, occurrence.conversationId, occurrence.messageNodeId)
             }
         }
@@ -195,6 +203,13 @@ fun ComparisonPage(
                 .fillMaxSize()
                 .padding(contentPadding)
         ) {
+            // 逐字比较的说明放在最顶上：用户需要先知道「不相似度合并」这个前提
+            Text(
+                text = stringResource(R.string.comparison_explainer),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
             ComparisonToolbar(
                 conversations = state.conversations,
                 viewMode = state.viewMode,
@@ -228,9 +243,16 @@ fun ComparisonPage(
                 metrics = metrics,
                 onCancelLoading = vm::cancelLoading,
                 onExpand = vm::expand,
+                onExpandSegment = vm::expandSegment,
                 onNodeClick = handleNodeClick,
+                onEndpointClick = { node ->
+                    endpointSheetTitles = endpointTitlesOf(state.graph, node)
+                },
                 onCanvasViewportChange = vm::setCanvasViewport,
                 onTimelineViewportChange = vm::setTimelineViewport,
+                onCanvasFitted = vm::markCanvasFitted,
+                onTimelineFitted = vm::markTimelineFitted,
+                onIndentPositionChange = vm::setIndentPosition,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
@@ -239,6 +261,7 @@ fun ComparisonPage(
     }
 
     if (showPicker) {
+        // 列出全部未选中的会话；满载时点击由 addConversation 发 SelectionLimitReached
         val options = remember(candidates, selectedIds) {
             availableCandidates(candidates, selectedIds)
         }
@@ -246,6 +269,7 @@ fun ComparisonPage(
             conversations = options,
             selected = selectedIds,
             enabled = !state.loading,
+            atLimit = selectedIds.size >= COMPARISON_MAX_CONVERSATIONS,
             onToggle = { id ->
                 if (id in selectedIds) vm.removeConversation(id) else vm.addConversation(id)
             },
@@ -263,6 +287,51 @@ fun ComparisonPage(
                     openOccurrence(occurrence)
                 },
             )
+        }
+    }
+
+    // 「N 个会话在此结束」点开后列名字
+    val endpointTitles = endpointSheetTitles
+    if (endpointTitles != null) {
+        ModalBottomSheet(onDismissRequest = { endpointSheetTitles = null }) {
+            EndpointTitlesSheet(
+                titles = endpointTitles,
+                onDismiss = { endpointSheetTitles = null },
+            )
+        }
+    }
+}
+
+@Composable
+private fun EndpointTitlesSheet(
+    titles: List<String>,
+    onDismiss: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.comparison_endpoint_list_title),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+        )
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 480.dp),
+        ) {
+            // 会话标题可能重名，不能用标题做 key
+            items(titles.size) { index ->
+                val title = titles[index]
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            text = title.ifBlank { stringResource(R.string.comparison_untitled) },
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    modifier = Modifier.clickable(onClick = onDismiss),
+                )
+            }
         }
     }
 }
@@ -318,6 +387,11 @@ private fun ComparisonToolbar(
     onRemove: (Uuid) -> Unit,
     onAdd: (() -> Unit)?,
 ) {
+    // 超过 4 个会话时先只露 3 个 chip，避免把图挤到只剩一条缝
+    var chipsExpanded by rememberSaveable { mutableStateOf(false) }
+    val collapsed = conversations.size > 4 && !chipsExpanded
+    val shown = if (collapsed) conversations.take(3) else conversations
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -328,7 +402,7 @@ private fun ComparisonToolbar(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            conversations.forEach { summary ->
+            shown.forEach { summary ->
                 val title = if (summary.title.isBlank()) {
                     stringResource(R.string.comparison_untitled)
                 } else {
@@ -353,6 +427,20 @@ private fun ComparisonToolbar(
                             modifier = Modifier
                                 .size(16.dp)
                                 .clickable(enabled = enabled) { onRemove(summary.id) },
+                        )
+                    },
+                )
+            }
+            if (conversations.size > 4) {
+                AssistChip(
+                    onClick = { chipsExpanded = !chipsExpanded },
+                    label = {
+                        Text(
+                            if (collapsed) {
+                                stringResource(R.string.comparison_more_chips, conversations.size - 3)
+                            } else {
+                                stringResource(R.string.comparison_collapse_text)
+                            }
                         )
                     },
                 )
@@ -387,15 +475,24 @@ private fun ComparisonToolbar(
     }
 }
 
+/** 只列「真正在这个节点结束」的会话，路过的会话不算。 */
+private fun endpointTitlesOf(graph: ComparisonGraph?, node: ComparisonNode): List<String> =
+    graph?.let { conversationEndpointTitles(it)[node.id] }.orEmpty()
+
 @Composable
 private fun ComparisonContent(
     state: ComparisonUiState,
     metrics: ComparisonMetrics,
     onCancelLoading: () -> Unit,
     onExpand: (String) -> Unit,
+    onExpandSegment: (String) -> Unit,
     onNodeClick: (ComparisonNode) -> Unit,
+    onEndpointClick: (ComparisonNode) -> Unit,
     onCanvasViewportChange: (ComparisonViewport) -> Unit,
     onTimelineViewportChange: (ComparisonViewport) -> Unit,
+    onCanvasFitted: () -> Unit,
+    onTimelineFitted: () -> Unit,
+    onIndentPositionChange: (Int, Int, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val graph = state.graph
@@ -435,16 +532,23 @@ private fun ComparisonContent(
                 )
             } else {
                 val sizes = remember(graph) { subtreeSizes(graph) }
-                val endpoints = remember(graph) { conversationEndpoints(graph) }
+                val endpointTitles = remember(graph) { conversationEndpointTitles(graph) }
+                val endpoints = endpointTitles.keys
                 when (state.viewMode) {
                     ComparisonViewMode.INDENTED -> IndentedTreeView(
                         graph = graph,
                         endpointIds = endpoints,
                         metrics = metrics,
-                        expanded = state.expanded,
-                        onExpand = onExpand,
                         onNodeClick = onNodeClick,
                         modifier = modifier,
+                        expanded = state.expanded,
+                        onExpand = onExpand,
+                        endpointTitles = endpointTitles,
+                        onEndpointClick = onEndpointClick,
+                        firstVisibleIndex = state.indentFirstIndex,
+                        firstVisibleOffset = state.indentOffset,
+                        horizontalScroll = state.indentScrollX,
+                        onPositionChange = onIndentPositionChange,
                     )
 
                     // 画布/时间线按像素 offset 定位，RTL 会把偏移镜像到屏幕外；内部固定 LTR
@@ -463,6 +567,11 @@ private fun ComparisonContent(
                             onNodeClick = onNodeClick,
                             metrics = metrics,
                             modifier = modifier,
+                            endpointTitles = endpointTitles,
+                            onEndpointClick = onEndpointClick,
+                            fitted = state.canvasFitted,
+                            onFitted = onCanvasFitted,
+                            onExpandSegment = onExpandSegment,
                         )
                     }
 
@@ -489,6 +598,11 @@ private fun ComparisonContent(
                                 onNodeClick = onNodeClick,
                                 metrics = metrics,
                                 modifier = modifier,
+                                endpointTitles = endpointTitles,
+                                onEndpointClick = onEndpointClick,
+                                fitted = state.timelineFitted,
+                                onFitted = onTimelineFitted,
+                                onExpandSegment = onExpandSegment,
                             )
                         }
                     }

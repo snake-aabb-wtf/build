@@ -19,7 +19,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -70,12 +69,21 @@ fun CanvasTreeView(
     onNodeClick: (ComparisonNode) -> Unit,
     metrics: ComparisonMetrics,
     modifier: Modifier = Modifier,
+    endpointTitles: Map<String, List<String>> = emptyMap(),
+    onEndpointClick: (ComparisonNode) -> Unit = {},
+    /** 是否已完成首次 fit：放在 VM 里，切视图回来不再重置用户的缩放/平移。 */
+    fitted: Boolean = false,
+    onFitted: () -> Unit = {},
+    onExpandSegment: (String) -> Unit = {},
 ) {
     val points = layout.points
     if (points.isEmpty()) return
 
     val folded = remember(graph, sizes, expanded) { foldedNodeIds(graph, sizes, expanded) }
-    val visible = remember(graph, folded) { visibleNodeIds(graph, folded) }
+    val linear = remember(graph, expanded) { linearCompression(graph, expanded) }
+    val visible = remember(graph, folded, linear) {
+        visibleNodeIds(graph, folded, linear.hidden)
+    }
     val edgeColor = MaterialTheme.colorScheme.outlineVariant
     val density = LocalDensity.current
     val latestViewport by rememberUpdatedState(viewport)
@@ -97,7 +105,6 @@ fun CanvasTreeView(
         val latestBounds by rememberUpdatedState(bounds)
         val latestDensity by rememberUpdatedState(densityValue)
         // 首次进入 / 换图时 fit 一次；旋转或缩放后只重新限位，不重置用户的视图
-        val fitted = remember(graph) { mutableStateOf(false) }
 
         fun fit(): ComparisonViewport = bounds?.let { box ->
             fitViewport(
@@ -111,11 +118,11 @@ fun CanvasTreeView(
 
         val latestFit by rememberUpdatedState(fit())
 
-        LaunchedEffect(bounds, scale, viewportWidthPx, viewportHeightPx) {
-            if (!fitted.value) {
+        LaunchedEffect(bounds, scale, viewportWidthPx, viewportHeightPx, fitted) {
+            if (!fitted) {
                 if (bounds != null && viewportWidthPx > 0f && viewportHeightPx > 0f) {
-                    fitted.value = true
                     latestOnChange(fit())
+                    onFitted()
                 }
                 return@LaunchedEffect
             }
@@ -232,6 +239,10 @@ fun CanvasTreeView(
                     ComparisonNodeCard(
                         node = node,
                         endpoint = point.id in endpointIds,
+                        endpointTitles = endpointTitles[point.id].orEmpty(),
+                        onEndpointClick = {
+                            if (endpointTitles[point.id].orEmpty().size > 1) onEndpointClick(node)
+                        },
                         maxLines = 3,
                         minHeight = cardHeight,
                         modifier = Modifier
@@ -267,6 +278,34 @@ fun CanvasTreeView(
                         }
                     }
                 }
+            }
+
+            // 线性长链的中段：chip 挂在第一颗被藏起来的节点位置，点一下恢复整段
+            linear.anchors.forEach { (anchorId, count) ->
+                if (anchorId in drawn.ids) return@forEach
+                val anchor = points[anchorId] ?: return@forEach
+                val parentId = graph.nodes[anchorId]?.parentId ?: return@forEach
+                if (parentId !in drawn.ids) return@forEach
+                if (!intersectsViewport(anchor, world, cardWidth.value, rowHeight.value)) {
+                    return@forEach
+                }
+                ComparisonFoldChip(
+                    hiddenCount = count,
+                    label = stringResource(R.string.comparison_linear_more, count),
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                (anchor.x * densityValue * scale + viewport.panX).roundToInt(),
+                                (anchor.y * densityValue * scale + viewport.panY).roundToInt(),
+                            )
+                        }
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            transformOrigin = TransformOrigin(0f, 0f)
+                        },
+                    onClick = { onExpandSegment(anchorId) },
+                )
             }
 
             if (drawn.hiddenCount > 0) {

@@ -23,7 +23,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -73,12 +72,21 @@ fun TimelineView(
     onNodeClick: (ComparisonNode) -> Unit,
     metrics: ComparisonMetrics,
     modifier: Modifier = Modifier,
+    endpointTitles: Map<String, List<String>> = emptyMap(),
+    onEndpointClick: (ComparisonNode) -> Unit = {},
+    /** 是否已完成首次 fit：放在 VM 里，切视图回来不再重置用户的平移。 */
+    fitted: Boolean = false,
+    onFitted: () -> Unit = {},
+    onExpandSegment: (String) -> Unit = {},
 ) {
     val points = layout.points
     if (points.isEmpty()) return
 
     val folded = remember(graph, sizes, expanded) { foldedNodeIds(graph, sizes, expanded) }
-    val visible = remember(graph, folded) { visibleNodeIds(graph, folded) }
+    val linear = remember(graph, expanded) { linearCompression(graph, expanded) }
+    val visible = remember(graph, folded, linear) {
+        visibleNodeIds(graph, folded, linear.hidden)
+    }
     val colors = MaterialTheme.colorScheme
     val laneColors = remember(colors) {
         listOf(
@@ -99,8 +107,12 @@ fun TimelineView(
     val laneHeight = metrics.timelineLaneHeight
     val laneHeightPx = with(density) { laneHeight.toPx() }
     val laneCount = max(layout.leafCount, 1)
-    val titles = remember(graph, points, laneHeight, laneCount) {
-        laneTitles(graph, points, laneHeight.value, laneCount)
+    val laneSessions = remember(graph, points, laneHeight, laneCount) {
+        laneConversationTitles(graph, points, laneHeight.value, laneCount)
+    }
+    val untitledLabel = stringResource(R.string.comparison_untitled)
+    val titles = laneSessions.map { sessions ->
+        laneTitleText(sessions.map { it.ifBlank { untitledLabel } })
     }
     // 包围盒取折叠后的可见节点；lane 底色仍按全量 lane 数铺，避免标题列和底色对不上
     val bounds = remember(points, visible, cardWidth, laneHeight) {
@@ -146,14 +158,12 @@ fun TimelineView(
         }
 
         val latestFit by rememberUpdatedState(fit())
-        // 首次进入 / 换图时按内容 fit 一次
-        val fitted = remember(graph) { mutableStateOf(false) }
-
-        LaunchedEffect(bounds, contentHeightDp, contentViewportPx, heightPx) {
-            if (!fitted.value) {
+        // 首次进入 / 换图时按内容 fit 一次；切视图回来沿用 VM 里的 viewport
+        LaunchedEffect(bounds, contentHeightDp, contentViewportPx, heightPx, fitted) {
+            if (!fitted) {
                 if (bounds != null && contentViewportPx > 0f && heightPx > 0f) {
-                    fitted.value = true
                     latestOnChange(fit())
+                    onFitted()
                 }
                 return@LaunchedEffect
             }
@@ -279,6 +289,10 @@ fun TimelineView(
                         ComparisonNodeCard(
                             node = node,
                             endpoint = point.id in endpointIds,
+                            endpointTitles = endpointTitles[point.id].orEmpty(),
+                            onEndpointClick = {
+                                if (endpointTitles[point.id].orEmpty().size > 1) onEndpointClick(node)
+                            },
                             maxLines = 4,
                             minHeight = cardHeight,
                             accent = accent,
@@ -306,6 +320,28 @@ fun TimelineView(
                             }
                         }
                     }
+                }
+
+                // 线性长链的中段：chip 挂在第一颗被藏起来的节点位置，点一下恢复整段
+                linear.anchors.forEach { (anchorId, count) ->
+                    if (anchorId in drawn.ids) return@forEach
+                    val anchor = points[anchorId] ?: return@forEach
+                    val parentId = graph.nodes[anchorId]?.parentId ?: return@forEach
+                    if (parentId !in drawn.ids) return@forEach
+                    if (!intersectsViewport(anchor, world, cardWidth.value, laneHeight.value)) {
+                        return@forEach
+                    }
+                    ComparisonFoldChip(
+                        hiddenCount = count,
+                        label = stringResource(R.string.comparison_linear_more, count),
+                        modifier = Modifier.offset {
+                            IntOffset(
+                                (anchor.x * densityValue + panX).roundToInt(),
+                                (anchor.y * densityValue + panY).roundToInt(),
+                            )
+                        },
+                        onClick = { onExpandSegment(anchorId) },
+                    )
                 }
 
                 if (drawn.hiddenCount > 0) {

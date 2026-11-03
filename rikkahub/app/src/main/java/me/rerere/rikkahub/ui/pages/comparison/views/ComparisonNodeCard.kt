@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +50,8 @@ fun ComparisonNodeCard(
     minHeight: Dp = 0.dp,
     expandable: Boolean = false,
     depth: Int? = null,
+    endpointTitles: List<String> = emptyList(),
+    onEndpointClick: (() -> Unit)? = null,
     onClick: () -> Unit = {},
 ) {
     if (node.message.isContextCheckpoint) {
@@ -59,6 +62,8 @@ fun ComparisonNodeCard(
             modifier = modifier,
             minHeight = minHeight,
             expandable = expandable,
+            endpointTitles = endpointTitles,
+            onEndpointClick = onEndpointClick,
             onClick = onClick,
         )
         return
@@ -88,6 +93,8 @@ fun ComparisonNodeCard(
                 isFork = isFork,
                 accent = accent,
                 depth = depth,
+                endpointTitles = endpointTitles,
+                onEndpointClick = onEndpointClick,
                 content = content,
             )
             NodeBody(
@@ -107,6 +114,8 @@ private fun CardHeader(
     isFork: Boolean,
     accent: Color?,
     depth: Int?,
+    endpointTitles: List<String>,
+    onEndpointClick: (() -> Unit)?,
     content: Color,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -156,39 +165,46 @@ private fun CardHeader(
             )
         }
         if (endpoint) {
-            EndpointBadge()
+            EndpointBadge(titles = endpointTitles, onClick = onEndpointClick)
         }
     }
 
+    SourceTitles(node = node, content = content)
+}
+
+/** 卡片来源标签：最多三条，其余收成 `+N`，避免会话标题把卡片挤爆。 */
+@Composable
+private fun SourceTitles(
+    node: ComparisonNode,
+    content: Color,
+) {
     val sourceTitles = node.occurrences
         .map { occurrence ->
             occurrence.conversationTitle.ifBlank { stringResource(R.string.comparison_untitled) }
         }
         .distinct()
-    if (sourceTitles.isNotEmpty()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            // 来源标签最多两个，剩下收成 +N，避免标题把卡片挤爆
-            sourceTitles.take(2).forEach { title ->
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = content.copy(alpha = 0.55f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-            }
-            if (sourceTitles.size > 2) {
-                Text(
-                    text = "+" + (sourceTitles.size - 2),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = content.copy(alpha = 0.55f),
-                    maxLines = 1,
-                )
-            }
+    if (sourceTitles.isEmpty()) return
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        sourceTitles.take(3).forEach { title ->
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall,
+                color = content.copy(alpha = 0.55f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+        if (sourceTitles.size > 3) {
+            Text(
+                text = "+" + (sourceTitles.size - 3),
+                style = MaterialTheme.typography.labelSmall,
+                color = content.copy(alpha = 0.55f),
+                maxLines = 1,
+            )
         }
     }
 }
@@ -235,15 +251,21 @@ private fun ComparisonCheckpointCard(
     modifier: Modifier = Modifier,
     minHeight: Dp = 0.dp,
     expandable: Boolean = false,
+    endpointTitles: List<String> = emptyList(),
+    onEndpointClick: (() -> Unit)? = null,
     onClick: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
+    val content = colors.onTertiaryContainer
+    val isFork = node.childIds.size > 1
     Surface(
         onClick = onClick,
         modifier = modifier.heightIn(min = minHeight),
         shape = RoundedCornerShape(14.dp),
         color = colors.tertiaryContainer,
-        contentColor = colors.onTertiaryContainer,
+        contentColor = content,
+        // 检查点也可能是分叉点：同样描边，别让它看起来像普通正文
+        border = if (isFork) BorderStroke(1.dp, colors.primary) else null,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
@@ -259,14 +281,33 @@ private fun ComparisonCheckpointCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (node.occurrences.size > 1) {
+                    Text(
+                        text = stringResource(R.string.comparison_shared_by, node.occurrences.size),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = content.copy(alpha = 0.7f),
+                        maxLines = 1,
+                    )
+                }
                 Spacer(Modifier.weight(1f))
-                if (endpoint) EndpointBadge()
+                if (isFork) {
+                    Text(
+                        text = stringResource(R.string.comparison_fork),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.primary,
+                        maxLines = 1,
+                    )
+                }
+                if (endpoint) {
+                    EndpointBadge(titles = endpointTitles, onClick = onEndpointClick)
+                }
             }
+            SourceTitles(node = node, content = content)
             NodeBody(
                 node = node,
                 maxLines = maxLines,
                 expandable = expandable,
-                content = colors.onTertiaryContainer,
+                content = content,
             )
         }
     }
@@ -283,6 +324,8 @@ fun ComparisonFoldChip(
     modifier: Modifier = Modifier,
     endpoint: Boolean = false,
     fork: Boolean = false,
+    /** 自定义文案（线性长链的中段压缩用）；null 时显示「+N 条后续」。 */
+    label: String? = null,
     onClick: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
@@ -300,7 +343,7 @@ fun ComparisonFoldChip(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = stringResource(R.string.comparison_fold_more, hiddenCount),
+                text = label ?: stringResource(R.string.comparison_fold_more, hiddenCount),
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
             )
@@ -323,12 +366,38 @@ fun ComparisonFoldChip(
     }
 }
 
+/**
+ * 终点徽标要说清「谁在此结束」：单条显示「<会话名> 在此结束」，多条只显示数量，
+ * 点一下由页面弹出名字列表。
+ */
 @Composable
-private fun EndpointBadge() {
+private fun EndpointBadge(
+    titles: List<String>,
+    onClick: (() -> Unit)? = null,
+) {
     val color = MaterialTheme.colorScheme.tertiary
+    val untitled = stringResource(R.string.comparison_untitled)
+    val label = when {
+        titles.isEmpty() -> stringResource(R.string.comparison_endpoint)
+        titles.size == 1 -> stringResource(
+            R.string.comparison_endpoint_here,
+            titles.single().ifBlank { untitled },
+        )
+
+        else -> stringResource(R.string.comparison_endpoint_many, titles.size)
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
+        modifier = Modifier
+            .widthIn(max = 150.dp)
+            .then(
+                if (onClick != null && titles.size > 1) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier
+                }
+            ),
     ) {
         Box(
             modifier = Modifier
@@ -336,10 +405,11 @@ private fun EndpointBadge() {
                 .background(color, CircleShape)
         )
         Text(
-            text = stringResource(R.string.comparison_endpoint),
+            text = label,
             style = MaterialTheme.typography.labelSmall,
             color = color,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

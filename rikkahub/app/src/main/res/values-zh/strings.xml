@@ -1803,7 +1803,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="trash_page_unknown_assistant">未知助手</string>
   <!-- Branch comparison page -->
   <string name="comparison_page_title">分支对比</string>
-  <string name="comparison_summary">%1$d 个节点 · %2$d 条会话</string>
+  <string name="comparison_summary">%1$d 个节点 · %2$d 个会话</string>
   <string name="comparison_view_indented">缩进树</string>
   <string name="comparison_view_canvas">画布</string>
   <string name="comparison_view_timeline">时间线</string>
@@ -1817,14 +1817,14 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="comparison_empty">暂无可对比的内容</string>
   <string name="comparison_failed">构建对比失败</string>
   <string name="comparison_no_common_prefix">这些会话没有共同开头</string>
-  <string name="comparison_missing">已移出 %1$d 个不存在的会话</string>
+  <string name="comparison_missing">已移出 %1$d 个已删除或已归档的会话</string>
   <string name="comparison_remove">移出对比</string>
   <string name="comparison_add">添加</string>
   <string name="comparison_untitled">未命名</string>
   <string name="comparison_no_messages">无消息</string>
   <string name="comparison_endpoint">终点</string>
   <string name="comparison_fork">分叉</string>
-  <string name="comparison_shared_by">%1$d 条共有</string>
+  <string name="comparison_shared_by">%1$d 个会话共有</string>
   <string name="comparison_fold_more">+%1$d 条后续</string>
   <string name="comparison_expand_text">展开全文</string>
   <string name="comparison_collapse_text">收起</string>
@@ -1848,8 +1848,15 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="comparison_compare_action">对比分支</string>
   <string name="comparison_select_hint">至少选择 2 个会话</string>
   <string name="comparison_choose_source">选择来源会话</string>
-  <string name="comparison_large_graph">对比图较大：缩进树视图会显示全部消息</string>
+  <string name="comparison_large_graph">图较大，可切到缩进树查看全部</string>
   <string name="comparison_need_two">至少选择 2 个会话才能对比</string>
   <string name="comparison_picker_title">添加会话</string>
   <string name="comparison_picker_empty">没有可选的会话</string>
+  <string name="comparison_explainer">逐字比较：内容完全相同才合并，不做相似度匹配</string>
+  <string name="comparison_endpoint_here">%1$s 在此结束</string>
+  <string name="comparison_endpoint_many">%1$d 个会话在此结束</string>
+  <string name="comparison_endpoint_list_title">在此结束的会话</string>
+  <string name="comparison_message_missing">消息已不存在</string>
+  <string name="comparison_more_chips">还有 %1$d 个</string>
+  <string name="comparison_linear_more">… %1$d 条</string>
 </resources>

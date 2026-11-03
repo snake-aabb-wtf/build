@@ -31,6 +31,24 @@ fun toggleComparisonSelection(
     else -> selected + id
 }
 
+/**
+ * 从保存状态恢复选择：区分「没存过」和「存的是空列表」。
+ *
+ * `saved == null` 才退回路由参数；空列表是用户删到 0 个的有效状态，必须保持空，
+ * 否则删干净后重建页面会把路由里的原始会话又「复活」。
+ */
+fun restoreComparisonIds(
+    saved: List<String>?,
+    fallback: List<String>,
+    limit: Int = COMPARISON_MAX_CONVERSATIONS,
+): List<Uuid> {
+    val source = saved ?: fallback
+    return source
+        .mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }
+        .distinct()
+        .take(limit)
+}
+
 /** 选中数量够不够开始对比。 */
 fun canCompare(selected: Set<Uuid>): Boolean = selected.size >= COMPARISON_MIN_CONVERSATIONS
 
@@ -42,24 +60,20 @@ fun canAddConversation(
 ): Boolean = id !in selected && selected.size < limit
 
 /**
- * 选择器实际列出的会话：只列还没进对比的，最多补到上限。
+ * 选择器实际列出的会话：只列还没进对比的全部候选。
  *
- * 已在对比里的会话在上方 chip 里显示，不在弹层里重复出现；没有空位时弹层为空。
+ * 已在对比里的会话在上方 chip 里显示，不在弹层里重复出现。上限只在「加入时」由
+ * [canAddConversation] 判定：若在这里按剩余名额截断，已选 7 个时就只剩 1 条候选可选。
  */
 fun availableCandidates(
     candidates: List<ComparisonCandidate>,
     selected: Set<Uuid>,
-    limit: Int = COMPARISON_MAX_CONVERSATIONS,
-): List<ComparisonCandidate> {
-    val slots = (limit - selected.size).coerceAtLeast(0)
-    if (slots == 0) return emptyList()
-    return candidates
+): List<ComparisonCandidate> =
+    candidates
         .asSequence()
         .filter { it.id !in selected }
         .distinctBy { it.id }
-        .take(slots)
         .toList()
-}
 
 /** 图大到画布/时间线一次铺不开，但仍允许查看（缩进树不折叠）。 */
 fun isLargeComparison(graph: ComparisonGraph): Boolean =
@@ -80,11 +94,11 @@ sealed interface ConversationLoad {
 fun conversationLoad(conversation: Conversation?): ConversationLoad =
     if (conversation == null) ConversationLoad.Missing else ConversationLoad.Loaded(conversation)
 
-/** 需要从对比里移出：不存在，或已经在回收站；读库失败要保留选择。 */
+/** 需要从对比里移出：不存在、已在回收站或已归档；读库失败要保留选择。 */
 fun ConversationLoad.shouldDrop(): Boolean = when (this) {
     ConversationLoad.Missing -> true
     ConversationLoad.Unavailable -> false
-    is ConversationLoad.Loaded -> conversation.deletedAt > 0
+    is ConversationLoad.Loaded -> conversation.deletedAt > 0 || conversation.archivedAt > 0
 }
 
 /**

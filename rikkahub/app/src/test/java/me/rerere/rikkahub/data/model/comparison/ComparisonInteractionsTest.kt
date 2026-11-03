@@ -91,7 +91,7 @@ class ComparisonInteractionsTest {
     }
 
     @Test
-    fun `picker lists only unselected conversations up to the remaining slots`() {
+    fun `picker lists every unselected conversation`() {
         val candidates = (1..10).map { index ->
             ComparisonCandidate(Uuid.random(), "c$index", Instant.EPOCH)
         }
@@ -99,12 +99,52 @@ class ComparisonInteractionsTest {
 
         val available = availableCandidates(candidates, selected)
 
-        assertEquals(2, available.size)
+        // 已选 6 个时仍要看到全部 4 条候选，不能按剩余名额截断
+        assertEquals(4, available.size)
         assertTrue(available.none { it.id in selected })
-        assertEquals(candidates.drop(6).take(2).map { it.id }, available.map { it.id })
+        assertEquals(candidates.drop(6).map { it.id }, available.map { it.id })
+
+        // 已选 7 个时剩 1 个名额，但选择器仍列出全部 3 条，是否加得进由 canAddConversation 判定
+        val seven = candidates.take(7).map { it.id }.toSet()
+        assertEquals(3, availableCandidates(candidates, seven).size)
+        assertFalse(canAddConversation(seven, candidates[7].id))
+        assertFalse(canAddConversation(seven, candidates[8].id))
+
         assertEquals(
             emptyList<ComparisonCandidate>(),
             availableCandidates(candidates, candidates.take(8).map { it.id }.toSet()),
+        )
+    }
+
+    @Test
+    fun `duplicate candidate rows are collapsed`() {
+        val id = Uuid.random()
+        val candidates = listOf(
+            ComparisonCandidate(id, "first", Instant.EPOCH),
+            ComparisonCandidate(id, "duplicate", Instant.EPOCH),
+        )
+
+        val available = availableCandidates(candidates, emptySet())
+
+        assertEquals(1, available.size)
+        assertEquals("first", available.single().title)
+    }
+
+    @Test
+    fun `empty saved ids stay empty instead of resurrecting route ids`() {
+        val first = Uuid.random()
+        val second = Uuid.random()
+        val fallback = listOf(first.toString(), second.toString())
+
+        // 删到 0 个：存的是空列表，必须保持空
+        assertEquals(emptyList<Uuid>(), restoreComparisonIds(saved = emptyList(), fallback = fallback))
+        // 没存过才用路由参数
+        assertEquals(listOf(first, second), restoreComparisonIds(saved = null, fallback = fallback))
+        // 超出上限时只取前 8 个
+        val many = (1..12).map { Uuid.random().toString() }
+        assertEquals(
+            COMPARISON_MAX_CONVERSATIONS,
+            restoreComparisonIds(saved = many, fallback = emptyList()).size,
         )
     }
 

@@ -21,19 +21,23 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.model.comparison.COMPARISON_MAX_CONVERSATIONS
 import me.rerere.rikkahub.data.model.comparison.ComparisonCandidate
 import kotlin.uuid.Uuid
 
 /**
- * 追加会话的底部弹层：列出当前助手的可见会话，已选中的打勾。
+ * 追加会话的底部弹层：列出当前助手的可见会话，已在对比里的不再重复列出。
  *
- * 数据源与会话列表页一致（当前助手、不含归档与回收站）。
+ * 数据源与会话列表页一致（当前助手、不含归档与回收站）。是否加得进由 VM 的
+ * `canAddConversation` 判定，满载时给出提示。
  */
 @Composable
 fun ComparisonPickerSheet(
     conversations: List<ComparisonCandidate>,
     selected: Set<Uuid>,
     enabled: Boolean = true,
+    /** 已选满上限：点击候选不会加入，这里直接给出提示（弹层盖住了页面 snackbar）。 */
+    atLimit: Boolean = false,
     onToggle: (Uuid) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -44,6 +48,14 @@ fun ComparisonPickerSheet(
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             )
+            if (atLimit) {
+                Text(
+                    text = stringResource(R.string.comparison_limit, COMPARISON_MAX_CONVERSATIONS),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                )
+            }
             if (conversations.isEmpty()) {
                 Box(
                     modifier = Modifier
