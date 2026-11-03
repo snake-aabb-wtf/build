@@ -7,6 +7,7 @@ import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.toMessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.uuid.Uuid
@@ -139,6 +140,42 @@ class ComparisonGraphTest {
         assertEquals("A", occurrence.conversationTitle)
         assertEquals(messageNode.id, occurrence.messageNodeId)
         assertEquals(messageNode.currentMessage.id, occurrence.messageId)
+    }
+
+    @Test
+    fun `no common prefix starts multiple roots`() = runTest {
+        val a = conversation("A", user("a1"), assistant("a2"))
+        val b = conversation("B", user("b1"), assistant("b2"))
+
+        val graph = buildComparisonGraph(listOf(a, b), noFiles)
+
+        assertEquals(4, graph.nodes.size)
+        assertEquals(2, graph.rootIds.size)
+        graph.rootIds.forEach { id ->
+            val node = graph.nodes.getValue(id)
+            assertEquals(0, node.depth)
+            assertNull(node.parentId)
+            assertEquals(1, node.occurrences.size)
+        }
+    }
+
+    @Test
+    fun `selected candidate index is used`() = runTest {
+        val first = user("v0")
+        val second = user("v1")
+        val conversation = Conversation(
+            id = Uuid.random(),
+            assistantId = Uuid.random(),
+            title = "A",
+            messageNodes = listOf(MessageNode(messages = listOf(first, second), selectIndex = 1)),
+        )
+
+        val graph = buildComparisonGraph(listOf(conversation), noFiles)
+
+        assertEquals(1, graph.nodes.size)
+        val node = graph.nodes.getValue(graph.rootIds.single())
+        assertEquals("v1", node.message.toText())
+        assertEquals(second.id, node.occurrences.single().messageId)
     }
 
     private fun conversation(title: String, vararg messages: UIMessage) = Conversation(

@@ -135,6 +135,40 @@ class ComparisonLayoutTest {
         assertEquals(1999, layout.maxDepth)
     }
 
+    @Test
+    fun `subtree size counts all descendants`() = runTest {
+        val graph = buildComparisonGraph(listOf(conversation("A", "m0", "m1", "m2")), noFiles)
+
+        val sizes = subtreeSizes(graph)
+        val root = graph.nodes.getValue(graph.rootIds.single())
+        val mid = graph.nodes.getValue(root.childIds.single())
+        val leaf = graph.nodes.getValue(mid.childIds.single())
+
+        assertEquals(3, sizes.getValue(root.id))
+        assertEquals(2, sizes.getValue(mid.id))
+        assertEquals(1, sizes.getValue(leaf.id))
+    }
+
+    @Test
+    fun `timeline columns follow depth and lanes follow leaves`() = runTest {
+        val graph = buildComparisonGraph(
+            listOf(
+                conversation("A", "hi", "a"),
+                conversation("B", "hi", "b"),
+            ),
+            noFiles,
+        )
+
+        val layout = timelineLayout(graph, columnWidth = 200f, laneHeight = 80f)
+
+        assertEquals(2, layout.leafCount)
+        val root = graph.nodes.getValue(graph.rootIds.single())
+        assertEquals(0f, layout.points.getValue(root.id).x, 0.001f)
+        val leaves = graph.nodes.values.filter { it.childIds.isEmpty() }.map { layout.points.getValue(it.id) }
+        assertEquals(setOf(200f), leaves.map { it.x }.toSet())
+        assertEquals(setOf(0f, 80f), leaves.map { it.y }.toSet())
+    }
+
     private fun conversation(title: String, vararg texts: String) = Conversation(
         id = Uuid.random(),
         assistantId = Uuid.random(),

@@ -72,8 +72,8 @@ private suspend fun partFingerprint(part: UIMessagePart, fileHasher: FileHasher)
             b.segment("ST")
                 .segment(part.toolName)
                 .segment(part.status.name)
-                .segment(canonicalJsonElementOrEmpty(part.input, fileHasher, true))
-                .segment(canonicalJsonElementOrEmpty(part.output, fileHasher, true))
+                .segment(canonicalJsonElementOrEmpty(part.input, fileHasher, false))
+                .segment(canonicalJsonElementOrEmpty(part.output, fileHasher, false))
     }
     return b.toString()
 }

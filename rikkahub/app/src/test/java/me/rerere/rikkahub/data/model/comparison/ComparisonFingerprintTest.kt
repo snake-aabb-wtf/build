@@ -173,6 +173,75 @@ class ComparisonFingerprintTest {
         assertNotEquals(messageFingerprint(a, FileHasher { "same" }), messageFingerprint(b, FileHasher { "same" }))
     }
 
+    @Test
+    fun `fields inside the same part type are compared`() = runTest {
+        fun fp(part: UIMessagePart) = messageFingerprint(
+            UIMessage(role = MessageRole.ASSISTANT, parts = listOf(part)),
+            noFiles,
+        )
+
+        assertNotEquals(
+            fp(UIMessagePart.ToolCall("c", "read", "{}")),
+            fp(UIMessagePart.ToolCall("c", "write", "{}")),
+        )
+        assertNotEquals(fp(UIMessagePart.Reasoning("a")), fp(UIMessagePart.Reasoning("b")))
+        assertNotEquals(
+            fp(UIMessagePart.Tool("c", "t", """{"q":1}""")),
+            fp(UIMessagePart.Tool("c", "t", """{"q":2}""")),
+        )
+        assertNotEquals(
+            fp(UIMessagePart.Tool("c", "t", "{}", output = listOf(UIMessagePart.Text("a")))),
+            fp(UIMessagePart.Tool("c", "t", "{}", output = listOf(UIMessagePart.Text("b")))),
+        )
+        assertNotEquals(
+            fp(UIMessagePart.ServerTool("c", "t", status = me.rerere.ai.ui.ServerToolStatus.COMPLETED)),
+            fp(UIMessagePart.ServerTool("c", "t", status = me.rerere.ai.ui.ServerToolStatus.FAILED)),
+        )
+        assertNotEquals(
+            fp(UIMessagePart.ToolResult("c", "t", json.parseToJsonElement("""{"ok":true}"""), json.parseToJsonElement("{}"))),
+            fp(UIMessagePart.ToolResult("c", "t", json.parseToJsonElement("""{"ok":false}"""), json.parseToJsonElement("{}"))),
+        )
+    }
+
+    @Test
+    fun `json key names and array order are compared`() = runTest {
+        assertNotEquals(
+            messageFingerprint(toolCallMessage("""{"a":1}"""), noFiles),
+            messageFingerprint(toolCallMessage("""{"b":1}"""), noFiles),
+        )
+        assertNotEquals(
+            messageFingerprint(toolCallMessage("""{"a":[1,2]}"""), noFiles),
+            messageFingerprint(toolCallMessage("""{"a":[2,1]}"""), noFiles),
+        )
+    }
+
+    @Test
+    fun `file urls in tool inputs stay literal`() = runTest {
+        val hasher = FileHasher { "same" }
+        fun call(path: String) = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.ToolCall("c", "write", """{"path":"$path"}""")),
+        )
+        fun tool(path: String) = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Tool("c", "write", """{"path":"$path"}""")),
+        )
+        fun server(path: String) = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.ServerTool(
+                    "c", "write",
+                    input = json.parseToJsonElement("""{"path":"$path"}"""),
+                    status = me.rerere.ai.ui.ServerToolStatus.COMPLETED,
+                )
+            ),
+        )
+
+        assertNotEquals(messageFingerprint(call("file:///a"), hasher), messageFingerprint(call("file:///b"), hasher))
+        assertNotEquals(messageFingerprint(tool("file:///a"), hasher), messageFingerprint(tool("file:///b"), hasher))
+        assertNotEquals(messageFingerprint(server("file:///a"), hasher), messageFingerprint(server("file:///b"), hasher))
+    }
+
     private fun toolMessage(url: String) = UIMessage(
         role = MessageRole.ASSISTANT,
         parts = listOf(
