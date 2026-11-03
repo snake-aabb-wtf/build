@@ -65,13 +65,78 @@ class ComparisonFingerprintTest {
     }
 
     @Test
-    fun `hashes attachments nested in tool result json`() = runTest {
+    fun `tool result json paths stay literal`() = runTest {
         val a = toolResultMessage("file:///a.png")
         val b = toolResultMessage("file:///b.png")
 
-        assertEquals(messageFingerprint(a, FileHasher { "aaa" }), messageFingerprint(b, FileHasher { "aaa" }))
-        assertNotEquals(messageFingerprint(a, noFiles), messageFingerprint(b, noFiles))
+        // fork 不会重写 ToolResult 里的 URL，按内容哈希会把「不同路径」擦掉
+        assertNotEquals(messageFingerprint(a, FileHasher { "aaa" }), messageFingerprint(b, FileHasher { "aaa" }))
     }
+
+    @Test
+    fun `blank tool input equals empty object`() = runTest {
+        fun call(input: String) = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.ToolCall("c", "t", input)),
+        )
+        fun tool(input: String) = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Tool("c", "t", input)),
+        )
+
+        assertEquals(messageFingerprint(call(""), noFiles), messageFingerprint(call("{}"), noFiles))
+        assertEquals(messageFingerprint(call("   "), noFiles), messageFingerprint(call("{}"), noFiles))
+        assertEquals(messageFingerprint(tool(""), noFiles), messageFingerprint(tool("{}"), noFiles))
+    }
+
+    @Test
+    fun `document name and mime are compared`() = runTest {
+        fun doc(name: String, mime: String) = UIMessage(
+            role = MessageRole.USER,
+            parts = listOf(UIMessagePart.Document(url = "file:///x", fileName = name, mime = mime)),
+        )
+
+        assertNotEquals(
+            messageFingerprint(doc("a.pdf", "application/pdf"), noFiles),
+            messageFingerprint(doc("b.pdf", "application/pdf"), noFiles),
+        )
+        assertNotEquals(
+            messageFingerprint(doc("a.pdf", "application/pdf"), noFiles),
+            messageFingerprint(doc("a.pdf", "text/plain"), noFiles),
+        )
+    }
+
+    @Test
+    fun `tool approval reason is compared`() = runTest {
+        fun tool(state: me.rerere.ai.ui.ToolApprovalState) = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Tool("c", "t", "{}", approvalState = state)),
+        )
+
+        assertNotEquals(
+            messageFingerprint(tool(me.rerere.ai.ui.ToolApprovalState.Approved), noFiles),
+            messageFingerprint(tool(me.rerere.ai.ui.ToolApprovalState.Denied("unsafe")), noFiles),
+        )
+        assertNotEquals(
+            messageFingerprint(tool(me.rerere.ai.ui.ToolApprovalState.Denied("unsafe")), noFiles),
+            messageFingerprint(tool(me.rerere.ai.ui.ToolApprovalState.Denied("wrong path")), noFiles),
+        )
+    }
+
+    @Test
+    fun `annotations are compared`() = runTest {
+        fun message(title: String, url: String) = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("answer")),
+            annotations = listOf(me.rerere.ai.ui.UIMessageAnnotation.UrlCitation(title, url)),
+        )
+
+        assertNotEquals(
+            messageFingerprint(message("A", "https://a"), noFiles),
+            messageFingerprint(message("B", "https://b"), noFiles),
+        )
+    }
+
 
     @Test
     fun `json object key order does not matter`() = runTest {
@@ -175,7 +240,7 @@ class ComparisonFingerprintTest {
 
     @Test
     fun `fields inside the same part type are compared`() = runTest {
-        fun fp(part: UIMessagePart) = messageFingerprint(
+        suspend fun fp(part: UIMessagePart) = messageFingerprint(
             UIMessage(role = MessageRole.ASSISTANT, parts = listOf(part)),
             noFiles,
         )
@@ -240,6 +305,10 @@ class ComparisonFingerprintTest {
         assertNotEquals(messageFingerprint(call("file:///a"), hasher), messageFingerprint(call("file:///b"), hasher))
         assertNotEquals(messageFingerprint(tool("file:///a"), hasher), messageFingerprint(tool("file:///b"), hasher))
         assertNotEquals(messageFingerprint(server("file:///a"), hasher), messageFingerprint(server("file:///b"), hasher))
+        assertNotEquals(
+            messageFingerprint(toolResultMessage("file:///a"), hasher),
+            messageFingerprint(toolResultMessage("file:///b"), hasher),
+        )
     }
 
     private fun toolMessage(url: String) = UIMessage(

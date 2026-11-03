@@ -414,6 +414,8 @@ git commit -m "feat(compare): history entry and conversation picker"
 - 会话在停留期间被删除 → catch null，移出选择并 snackbar
 - 哈希进行中显示进度（不确定进度 + `hashing` 文案）
 - 图节点 > 2000 → 顶部提示可用 A 视图看全文
+- 判空用 `points.isEmpty()`，不要用 `maxDepth == 0`（单消息会话的 maxDepth 也是 0）
+- 文件哈希缓存键 = (canonical path, length, lastModified)，null 结果也缓存；指纹按 (conversationId, messageId) 缓存
 
 - [ ] **Step 3: 编译验证 + 单测全绿** → CI 通过
 

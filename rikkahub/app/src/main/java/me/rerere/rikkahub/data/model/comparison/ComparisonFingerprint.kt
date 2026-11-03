@@ -7,6 +7,8 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.ToolApprovalState
+import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import java.security.MessageDigest
 
@@ -31,6 +33,12 @@ internal suspend fun messageFingerprint(message: UIMessage, fileHasher: FileHash
     if (message.isContextCheckpoint) {
         builder.segment("CP")
     }
+    message.annotations.forEach { annotation ->
+        when (annotation) {
+            is UIMessageAnnotation.UrlCitation ->
+                builder.segment("A").segment(annotation.title).segment(annotation.url)
+        }
+    }
     message.parts.forEach { part ->
         builder.segment(partFingerprint(part, fileHasher))
     }
@@ -52,20 +60,23 @@ private suspend fun partFingerprint(part: UIMessagePart, fileHasher: FileHasher)
         is UIMessagePart.Video -> b.segment("FVideo").segment(fileKey(part.url, fileHasher))
         is UIMessagePart.Audio -> b.segment("FAudio").segment(fileKey(part.url, fileHasher))
         is UIMessagePart.Document -> b.segment("FDocument").segment(fileKey(part.url, fileHasher))
+            .segment(part.fileName).segment(part.mime)
         // toolCallId 在 fork 时会换新，不能参与比较
         is UIMessagePart.ToolCall ->
             b.segment("TC").segment(part.toolName).segment(canonicalJson(part.arguments, fileHasher, false))
+                .segment(approvalKey(part.approvalState))
 
         is UIMessagePart.ToolResult ->
             b.segment("TR")
                 .segment(part.toolName)
                 .segment(canonicalJsonElement(part.arguments, fileHasher, false))
-                .segment(canonicalJsonElement(part.content, fileHasher, true))
+                .segment(canonicalJsonElement(part.content, fileHasher, false))
 
         is UIMessagePart.Tool ->
             b.segment("TO")
                 .segment(part.toolName)
                 .segment(canonicalJson(part.input, fileHasher, false))
+                .segment(approvalKey(part.approvalState))
                 .segment(partsFingerprint(part.output, fileHasher))
 
         is UIMessagePart.ServerTool ->
@@ -90,13 +101,23 @@ private suspend fun partsFingerprint(
     return builder.toString()
 }
 
+private fun approvalKey(state: ToolApprovalState): String = when (state) {
+    ToolApprovalState.Auto -> "auto"
+    ToolApprovalState.Pending -> "pending"
+    ToolApprovalState.Approved -> "approved"
+    is ToolApprovalState.Denied -> "denied:" + state.reason
+    is ToolApprovalState.Answered -> "answered:" + state.answer
+}
+
 private suspend fun fileKey(url: String, fileHasher: FileHasher): String {
     return fileHasher.hash(url)?.let { "sha256:$it" } ?: url
 }
 
 /** 按键名排序的 JSON；解析失败（流式中的半截参数）时退回原始字符串。 */
 private suspend fun canonicalJson(raw: String, fileHasher: FileHasher, hashUrls: Boolean): String {
-    val element = runCatching { lenientJson.parseToJsonElement(raw) }.getOrNull()
+    // 空参数在 UI 里和 {} 等价（Tool.inputAsJson 同样归一），这里必须一致，否则整条尾巴假分叉
+    val source = if (raw.isBlank()) "{}" else raw
+    val element = runCatching { lenientJson.parseToJsonElement(source) }.getOrNull()
         ?: return "@raw:$raw"
     return element.canonicalString(fileHasher, hashUrls)
 }

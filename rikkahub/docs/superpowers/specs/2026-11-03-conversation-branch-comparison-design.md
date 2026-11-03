@@ -80,7 +80,12 @@
 - `ServerTool` 的名称、状态、输入输出
 - `Search` 作为一个占位标记
 - `Image` / `Video` / `Audio` / `Document`：本地文件取**文件内容的 SHA-256**（fork 会换 URL，URL 不可比）；文件不存在或非本地时退回 URL 字符串
-- **递归**：`Tool.output`、`ToolResult.content` 里嵌套的上述 part 同样按内容哈希处理——`Conversation.fork()` 的 `mapLocalFileUrls` 是递归的，不递归就会在工具输出处假分叉
+- `Document` 的 `fileName` 与 `mime`（聊天里显示文件名、按 mime 选图标，属于可见内容）
+- `Tool` / `ToolCall` 的 `approvalState`（`Denied.reason`、`Answered.answer` 会渲染给用户）
+- `UIMessage.annotations`（引用列表会渲染，含标题与 URL）
+- 工具输入的空串与 `{}` 视为同一件事（UI 的 `inputAsJson()` 就是这样归一）
+- **递归**：`Tool.output` 里嵌套的附件 part 同样按内容哈希处理（`Conversation.fork()` 的 `mapLocalFileUrls` 会递归改写这里）
+- **例外**：`ToolResult.content` / `ToolResult.arguments` / `ServerTool.input` / `ServerTool.output` 里的 `file://` 字符串按原文比较。fork 不重写这些位置，按内容哈希等于把「不同路径」这个真实差异擦掉，会造成假合并
 - 哈希结果按「文件绝对路径 + 大小 + mtime」缓存，同一次对比内复用
 - 消息带 `isContextCheckpoint` 时并入标记（压缩摘要与普通消息不是一回事）
 
@@ -89,8 +94,8 @@
 - `id`、`createdAt`、`finishedAt`
 - `modelId`、`modelSnapshot`、`usage`、`lastUsage`、`generationTimeMs`、`stepCount`
 - `translation`
-- `annotations`、`metadata`、`approvalState`
-- `isSynthetic`
+- `metadata`、`isSynthetic`
+- `toolCallId`（fork 会换新 id）
 
 不做 trim、不做空白归一、不做大小写折叠——就按字符串原样比。
 
