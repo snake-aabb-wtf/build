@@ -341,7 +341,8 @@ class ComparisonVM(
                         continue
                     }
                     val previous = signatureSnapshot[id] ?: branchSignature(cached)
-                    if (branchSignature(conversation) != previous) {
+                    // 改名只写 title 列、不动 updateAt，签名也不含标题，所以要单独比一次
+                    if (branchSignature(conversation) != previous || conversation.title != cached.title) {
                         reload += id
                     }
                 }
@@ -358,8 +359,9 @@ class ComparisonVM(
     /**
      * 用户在加载中点了取消：停掉 job，旧结果一律丢弃。
      *
-     * 会话摘要和展开状态也要一起清掉——留着它们会让 [syncWithCandidates] 以为还能继续，
-     * 一回到前台就自动重启构建。取消状态保持到主动刷新或选择变化（rebuild 会复位）。
+     * 展开状态一起清掉；会话摘要保留，这样顶部 chip 还在，用户可以逐个移除或点刷新重来。
+     * 自动重启由 `cancelled` 挡住（[syncWithCandidates] 直接返回），不需要清空摘要来防。
+     * 取消状态保持到主动刷新或选择变化（rebuild 会复位）。
      */
     fun cancelLoading() {
         buildJob?.cancel()
@@ -370,7 +372,6 @@ class ComparisonVM(
                 loading = false,
                 hashing = false,
                 graph = null,
-                conversations = emptyList(),
                 expanded = emptySet(),
                 failed = false,
                 cancelled = true,

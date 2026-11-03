@@ -268,7 +268,7 @@ fun ComparisonPage(
         ComparisonPickerSheet(
             conversations = options,
             selected = selectedIds,
-            enabled = !state.loading,
+            enabled = !state.loading && selectedIds.size < COMPARISON_MAX_CONVERSATIONS,
             atLimit = selectedIds.size >= COMPARISON_MAX_CONVERSATIONS,
             onToggle = { id ->
                 if (id in selectedIds) vm.removeConversation(id) else vm.addConversation(id)
