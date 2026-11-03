@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -70,8 +71,13 @@ fun CanvasTreeView(
 
     BoxWithConstraints(modifier = modifier.fillMaxSize().clipToBounds()) {
         val fitScale = (maxWidth.value / contentWidthDp).coerceIn(MinScale, 1f)
-        var scale by remember(layout, fitScale) { mutableFloatStateOf(fitScale) }
-        var offset by remember(layout, fitScale) { mutableStateOf(Offset.Zero) }
+        // state 只建一次，换图时用 effect 重置，避免 transformable 的 lambda 抓到旧的 state 对象
+        var scale by remember { mutableFloatStateOf(fitScale) }
+        var offset by remember { mutableStateOf(Offset.Zero) }
+        LaunchedEffect(layout, fitScale) {
+            scale = fitScale
+            offset = Offset.Zero
+        }
 
         val transformState = rememberTransformableState { zoomChange, panChange, _ ->
             scale = (scale * zoomChange).coerceIn(MinScale, MaxScale)
