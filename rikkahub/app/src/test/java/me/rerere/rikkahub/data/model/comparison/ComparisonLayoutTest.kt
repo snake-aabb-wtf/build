@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.model.comparison
 import kotlinx.coroutines.test.runTest
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.toMessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -138,7 +139,7 @@ class ComparisonLayoutTest {
         id = Uuid.random(),
         assistantId = Uuid.random(),
         title = title,
-        messageNodes = texts.map { text -> text.toMessage() },
+        messageNodes = texts.map { text -> text.toMessage().toMessageNode() },
     )
 
     private fun String.toMessage(): UIMessage = UIMessage.user(this)

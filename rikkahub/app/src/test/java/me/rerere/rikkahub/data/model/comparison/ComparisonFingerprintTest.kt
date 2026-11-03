@@ -125,7 +125,7 @@ class ComparisonFingerprintTest {
         val parts = listOf(
             UIMessagePart.Text("x"),
             UIMessagePart.Reasoning("x"),
-            UIMessagePart.Search(),
+            UIMessagePart.Search,
             UIMessagePart.Image("file:///x.png"),
             UIMessagePart.Video("file:///x.mp4"),
             UIMessagePart.Audio("file:///x.mp3"),
