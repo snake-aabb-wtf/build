@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.model.comparison
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import me.rerere.ai.ui.UIMessage
@@ -43,31 +44,39 @@ private fun StringBuilder.segment(value: String): StringBuilder {
 
 @Suppress("DEPRECATION")
 private suspend fun partFingerprint(part: UIMessagePart, fileHasher: FileHasher): String {
-    return when (part) {
-        is UIMessagePart.Text -> "T" + part.text
-        is UIMessagePart.Reasoning -> "R" + part.reasoning
-        is UIMessagePart.Search -> "S"
-        is UIMessagePart.Image -> "FImage" + fileKey(part.url, fileHasher)
-        is UIMessagePart.Video -> "FVideo" + fileKey(part.url, fileHasher)
-        is UIMessagePart.Audio -> "FAudio" + fileKey(part.url, fileHasher)
-        is UIMessagePart.Document -> "FDocument" + fileKey(part.url, fileHasher)
+    val b = StringBuilder()
+    when (part) {
+        is UIMessagePart.Text -> b.segment("T").segment(part.text)
+        is UIMessagePart.Reasoning -> b.segment("R").segment(part.reasoning)
+        is UIMessagePart.Search -> b.segment("S")
+        is UIMessagePart.Image -> b.segment("FImage").segment(fileKey(part.url, fileHasher))
+        is UIMessagePart.Video -> b.segment("FVideo").segment(fileKey(part.url, fileHasher))
+        is UIMessagePart.Audio -> b.segment("FAudio").segment(fileKey(part.url, fileHasher))
+        is UIMessagePart.Document -> b.segment("FDocument").segment(fileKey(part.url, fileHasher))
         // toolCallId 在 fork 时会换新，不能参与比较
-        is UIMessagePart.ToolCall -> "TC" + part.toolName + canonicalJson(part.arguments, fileHasher)
+        is UIMessagePart.ToolCall ->
+            b.segment("TC").segment(part.toolName).segment(canonicalJson(part.arguments, fileHasher, false))
+
         is UIMessagePart.ToolResult ->
-            "TR" + part.toolName + canonicalJsonElement(part.arguments, fileHasher) +
-                canonicalJsonElement(part.content, fileHasher)
+            b.segment("TR")
+                .segment(part.toolName)
+                .segment(canonicalJsonElement(part.arguments, fileHasher, false))
+                .segment(canonicalJsonElement(part.content, fileHasher, true))
 
         is UIMessagePart.Tool ->
-            "TO" + part.toolName + canonicalJson(part.input, fileHasher) +
-                partsFingerprint(part.output, fileHasher)
+            b.segment("TO")
+                .segment(part.toolName)
+                .segment(canonicalJson(part.input, fileHasher, false))
+                .segment(partsFingerprint(part.output, fileHasher))
 
         is UIMessagePart.ServerTool ->
-            "ST" + part.toolName + part.status.name +
-                (part.input?.let { canonicalJsonElement(it, fileHasher) } ?: "") +
-                (part.output?.let { canonicalJsonElement(it, fileHasher) } ?: "")
-
-        else -> part::class.simpleName ?: "?"
+            b.segment("ST")
+                .segment(part.toolName)
+                .segment(part.status.name)
+                .segment(canonicalJsonElementOrEmpty(part.input, fileHasher, true))
+                .segment(canonicalJsonElementOrEmpty(part.output, fileHasher, true))
     }
+    return b.toString()
 }
 
 /** 工具输出里嵌套的附件同样按内容比较，与 `Conversation.fork()` 的递归拷贝范围保持一致。 */
@@ -87,30 +96,45 @@ private suspend fun fileKey(url: String, fileHasher: FileHasher): String {
 }
 
 /** 按键名排序的 JSON；解析失败（流式中的半截参数）时退回原始字符串。 */
-private suspend fun canonicalJson(raw: String, fileHasher: FileHasher): String {
+private suspend fun canonicalJson(raw: String, fileHasher: FileHasher, hashUrls: Boolean): String {
     val element = runCatching { lenientJson.parseToJsonElement(raw) }.getOrNull()
         ?: return "@raw:$raw"
-    return element.canonicalString { url -> fileKey(url, fileHasher) }
+    return element.canonicalString(fileHasher, hashUrls)
 }
 
-private suspend fun canonicalJsonElement(element: JsonElement, fileHasher: FileHasher): String {
-    return element.canonicalString { url -> fileKey(url, fileHasher) }
+private suspend fun canonicalJsonElement(
+    element: JsonElement,
+    fileHasher: FileHasher,
+    hashUrls: Boolean,
+): String = element.canonicalString(fileHasher, hashUrls)
+
+/** null 与 JsonNull 都是「没有」，统一成空串，避免同一语义两种写法造成假分叉。 */
+private suspend fun canonicalJsonElementOrEmpty(
+    element: JsonElement?,
+    fileHasher: FileHasher,
+    hashUrls: Boolean,
+): String {
+    if (element == null || element is JsonNull) return ""
+    return element.canonicalString(fileHasher, hashUrls)
 }
 
-private suspend fun JsonElement.canonicalString(hashUrl: suspend (String) -> String): String {
+private suspend fun JsonElement.canonicalString(
+    fileHasher: FileHasher,
+    hashUrls: Boolean,
+): String {
     return when (this) {
         is JsonObject -> entries
             .sortedBy { it.key }
             .joinToString(separator = ",", prefix = "{", postfix = "}") { (key, value) ->
-                JsonPrimitive(key).toString() + ":" + value.canonicalString(hashUrl)
+                JsonPrimitive(key).toString() + ":" + value.canonicalString(fileHasher, hashUrls)
             }
 
         is JsonArray -> joinToString(separator = ",", prefix = "[", postfix = "]") {
-            it.canonicalString(hashUrl)
+            it.canonicalString(fileHasher, hashUrls)
         }
 
-        is JsonPrimitive -> if (isString && content.startsWith("file://")) {
-            JsonPrimitive(hashUrl(content)).toString()
+        is JsonPrimitive -> if (hashUrls && isString && content.startsWith("file://")) {
+            JsonPrimitive(fileKey(content, fileHasher)).toString()
         } else {
             toString()
         }
