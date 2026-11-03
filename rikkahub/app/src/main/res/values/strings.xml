@@ -1832,4 +1832,13 @@
   <string name="comparison_part_tool">[Tool] %1$s</string>
   <string name="comparison_part_reasoning">[Reasoning]</string>
   <string name="comparison_part_empty">[Empty message]</string>
+  <string name="comparison_select_mode">Select conversations</string>
+  <string name="comparison_selected_count">Selected %1$d</string>
+  <string name="comparison_compare_action">Compare branches</string>
+  <string name="comparison_select_hint">Pick at least 2 conversations</string>
+  <string name="comparison_choose_source">Choose a source conversation</string>
+  <string name="comparison_large_graph">Large comparison: Tree view shows every message</string>
+  <string name="comparison_need_two">Select at least 2 conversations to compare</string>
+  <string name="comparison_picker_title">Add conversations</string>
+  <string name="comparison_picker_empty">No conversations available</string>
 </resources>

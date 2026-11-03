@@ -7,37 +7,54 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.model.comparison.COMPARISON_MIN_CONVERSATIONS
 import me.rerere.rikkahub.data.model.comparison.ComparisonNode
+import me.rerere.rikkahub.data.model.comparison.NodeOccurrence
 import me.rerere.rikkahub.data.model.comparison.conversationEndpoints
+import me.rerere.rikkahub.data.model.comparison.isLargeComparison
+import me.rerere.rikkahub.data.model.comparison.sourceOccurrences
 import me.rerere.rikkahub.data.model.comparison.subtreeSizes
 import me.rerere.rikkahub.data.model.comparison.tidyLayout
 import me.rerere.rikkahub.data.model.comparison.timelineLayout
@@ -46,6 +63,8 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.pages.comparison.views.CanvasTreeView
 import me.rerere.rikkahub.ui.pages.comparison.views.IndentedTreeView
 import me.rerere.rikkahub.ui.pages.comparison.views.TimelineView
+import me.rerere.rikkahub.ui.pages.comparison.views.comparisonNodeText
+import me.rerere.rikkahub.ui.pages.comparison.views.comparisonRoleLabel
 import me.rerere.rikkahub.utils.pushToChatPage
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
@@ -65,16 +84,50 @@ fun ComparisonPage(
     vm: ComparisonVM = koinViewModel(parameters = { parametersOf(ids) }),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val candidates by vm.candidates.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    // Task 9 会换成「选一条会话」的弹层；这里先直接跳到第一个出现的会话
-    val handleNodeClick: (ComparisonNode) -> Unit = onNodeClick ?: { node ->
-        node.occurrences.firstOrNull()?.let { occurrence ->
-            pushToChatPage(navController, occurrence.conversationId, occurrence.messageNodeId)
+    var showPicker by remember { mutableStateOf(false) }
+    var occurrenceNode by remember { mutableStateOf<ComparisonNode?>(null) }
+
+    LaunchedEffect(vm) {
+        vm.events.collect { event ->
+            when (event) {
+                is ComparisonEvent.ConversationsMissing -> snackbarHostState.showSnackbar(
+                    context.getString(R.string.comparison_missing, event.count)
+                )
+            }
         }
     }
 
+    fun openOccurrence(occurrence: NodeOccurrence) {
+        scope.launch {
+            if (vm.verifyConversation(occurrence.conversationId)) {
+                pushToChatPage(navController, occurrence.conversationId, occurrence.messageNodeId)
+            }
+        }
+    }
+
+    // 单来源直接跳；多来源先让用户选哪个会话。push 导航，返回时对比页状态还在。
+    val handleNodeClick: (ComparisonNode) -> Unit = onNodeClick ?: { node ->
+        val sources = sourceOccurrences(node)
+        when {
+            sources.size == 1 -> openOccurrence(sources.single())
+            sources.size > 1 -> occurrenceNode = node
+        }
+    }
+
+    val selectedIds = remember(state.conversations) {
+        state.conversations.map { it.id }.toSet()
+    }
+
     Scaffold(
+        snackbarHost = {
+            SnackbarHost(hostState = snackbarHostState)
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -118,16 +171,8 @@ fun ComparisonPage(
                 viewMode = state.viewMode,
                 onViewModeChange = vm::setViewMode,
                 onRemove = vm::removeConversation,
-                onAdd = onAddConversations,
+                onAdd = onAddConversations ?: { showPicker = true },
             )
-            if (state.missingCount > 0) {
-                Text(
-                    text = stringResource(R.string.comparison_missing, state.missingCount),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
             val graph = state.graph
             if (graph != null &&
                 state.conversations.size > 1 &&
@@ -141,6 +186,15 @@ fun ComparisonPage(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
+            if (graph != null && isLargeComparison(graph)) {
+                // 只提示不拦：A 视图永不折叠，几千条消息也能逐条读
+                Text(
+                    text = stringResource(R.string.comparison_large_graph),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
             ComparisonContent(
                 state = state,
                 onExpand = vm::expand,
@@ -149,6 +203,71 @@ fun ComparisonPage(
                     .weight(1f)
                     .fillMaxWidth(),
             )
+        }
+    }
+
+    if (showPicker) {
+        ComparisonPickerSheet(
+            conversations = candidates,
+            selected = selectedIds,
+            onToggle = { id ->
+                if (id in selectedIds) vm.removeConversation(id) else vm.addConversation(id)
+            },
+            onDismiss = { showPicker = false },
+        )
+    }
+
+    val sheetNode = occurrenceNode
+    if (sheetNode != null) {
+        ModalBottomSheet(onDismissRequest = { occurrenceNode = null }) {
+            OccurrencePickerSheet(
+                node = sheetNode,
+                onPick = { occurrence ->
+                    occurrenceNode = null
+                    openOccurrence(occurrence)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun OccurrencePickerSheet(
+    node: ComparisonNode,
+    onPick: (NodeOccurrence) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.comparison_choose_source),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+        )
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 480.dp),
+        ) {
+            items(sourceOccurrences(node), key = { it.conversationId.toString() }) { occurrence ->
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            text = occurrence.conversationTitle.ifBlank {
+                                stringResource(R.string.comparison_untitled)
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    supportingContent = {
+                        Text(
+                            text = comparisonRoleLabel(node.message.role) + " · " + comparisonNodeText(node),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    modifier = Modifier.clickable { onPick(occurrence) },
+                )
+            }
         }
     }
 }
@@ -248,6 +367,11 @@ private fun ComparisonContent(
             text = stringResource(
                 if (state.failed) R.string.comparison_failed else R.string.comparison_empty
             ),
+            modifier = modifier,
+        )
+
+        state.conversations.size < COMPARISON_MIN_CONVERSATIONS -> ComparisonPlaceholder(
+            text = stringResource(R.string.comparison_need_two),
             modifier = modifier,
         )
 

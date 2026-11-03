@@ -78,7 +78,7 @@ fun ComparisonNodeCard(
                     )
                 }
                 Text(
-                    text = roleLabel(node.message.role),
+                    text = comparisonRoleLabel(node.message.role),
                     style = MaterialTheme.typography.labelSmall,
                     color = content.copy(alpha = 0.7f),
                     maxLines = 1,
@@ -204,7 +204,7 @@ private fun EndpointBadge() {
 }
 
 @Composable
-private fun roleLabel(role: MessageRole): String = when (role) {
+fun comparisonRoleLabel(role: MessageRole): String = when (role) {
     MessageRole.USER -> stringResource(R.string.comparison_role_user)
     MessageRole.ASSISTANT -> stringResource(R.string.comparison_role_assistant)
     MessageRole.SYSTEM -> stringResource(R.string.comparison_role_system)

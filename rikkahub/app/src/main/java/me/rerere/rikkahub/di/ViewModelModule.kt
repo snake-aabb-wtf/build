@@ -52,6 +52,7 @@ val viewModelModule = module {
         ComparisonVM(
             ids = params.get(),
             conversationRepository = get(),
+            settingsStore = get(),
         )
     }
     viewModel<ArchiveVM> {

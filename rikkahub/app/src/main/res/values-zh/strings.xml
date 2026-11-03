@@ -1834,4 +1834,13 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="comparison_part_tool">[工具] %1$s</string>
   <string name="comparison_part_reasoning">[思考]</string>
   <string name="comparison_part_empty">[空消息]</string>
+  <string name="comparison_select_mode">选择会话</string>
+  <string name="comparison_selected_count">已选 %1$d 个</string>
+  <string name="comparison_compare_action">对比分支</string>
+  <string name="comparison_select_hint">至少选择 2 个会话</string>
+  <string name="comparison_choose_source">选择来源会话</string>
+  <string name="comparison_large_graph">对比图较大：缩进树视图会显示全部消息</string>
+  <string name="comparison_need_two">至少选择 2 个会话才能对比</string>
+  <string name="comparison_picker_title">添加会话</string>
+  <string name="comparison_picker_empty">没有可选的会话</string>
 </resources>

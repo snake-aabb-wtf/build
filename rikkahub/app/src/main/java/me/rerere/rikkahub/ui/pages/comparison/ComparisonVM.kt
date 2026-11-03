@@ -4,16 +4,27 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.FileHasher
 import me.rerere.rikkahub.data.model.comparison.buildComparisonGraph
+import me.rerere.rikkahub.data.model.comparison.expandedWithSubtree
 import me.rerere.rikkahub.data.model.localFileUrls
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import kotlin.uuid.Uuid
@@ -30,6 +41,12 @@ data class ComparisonConversationSummary(
     val messageCount: Int,
 )
 
+/** 选择器里的一条候选会话：列表查询不带消息体，只需要标题。 */
+data class ComparisonCandidate(
+    val id: Uuid,
+    val title: String,
+)
+
 data class ComparisonUiState(
     val loading: Boolean = true,
     val hashing: Boolean = false,
@@ -42,6 +59,11 @@ data class ComparisonUiState(
     val failed: Boolean = false,
 )
 
+sealed interface ComparisonEvent {
+    /** 对比页停留期间有会话被删除，已经从选择里移出。 */
+    data class ConversationsMissing(val count: Int) : ComparisonEvent
+}
+
 /**
  * 只读地加载选中的会话并建图。
  *
@@ -51,6 +73,7 @@ data class ComparisonUiState(
 class ComparisonVM(
     ids: List<String>,
     private val conversationRepository: ConversationRepository,
+    private val settingsStore: SettingsStore,
     private val fileHasher: FileHasher = ComparisonFileHasher(),
 ) : ViewModel() {
     private val order: MutableList<Uuid> = ids
@@ -63,6 +86,26 @@ class ComparisonVM(
 
     private val _state = MutableStateFlow(ComparisonUiState())
     val state: StateFlow<ComparisonUiState> = _state.asStateFlow()
+
+    private val _events = Channel<ComparisonEvent>(Channel.BUFFERED)
+    val events: Flow<ComparisonEvent> = _events.receiveAsFlow()
+
+    /** 添加会话的选择器数据源：当前助手的可见会话，和会话列表页一致。 */
+    val candidates: StateFlow<List<ComparisonCandidate>> = settingsStore.settingsFlow
+        .map { it.getCurrentAssistant() }
+        .flatMapLatest { assistant ->
+            if (assistant == null) {
+                flowOf(emptyList<Conversation>())
+            } else {
+                conversationRepository.getConversationsOfAssistant(assistant.id)
+            }
+        }
+        .map { conversations ->
+            conversations.map { conversation ->
+                ComparisonCandidate(id = conversation.id, title = conversation.title)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         rebuild()
@@ -84,9 +127,18 @@ class ComparisonVM(
         _state.update { if (it.viewMode == mode) it else it.copy(viewMode = mode) }
     }
 
+    /**
+     * 折叠 chip 点开时整棵子树一起展开，3000 条消息的长链不必一层层点；
+     * 再次点击只收起这个节点，后代留在已展开集合里，重新展开时直接可见。
+     */
     fun expand(id: String) {
-        _state.update {
-            it.copy(expanded = if (id in it.expanded) it.expanded - id else it.expanded + id)
+        _state.update { state ->
+            if (id in state.expanded) {
+                state.copy(expanded = state.expanded - id)
+            } else {
+                val graph = state.graph ?: return@update state
+                state.copy(expanded = expandedWithSubtree(graph, state.expanded, id))
+            }
         }
     }
 
@@ -94,6 +146,24 @@ class ComparisonVM(
     fun refresh() {
         loaded.clear()
         rebuild()
+    }
+
+    /**
+     * 跳转前确认会话还在。停留期间被删掉的会话从选择里移出并通知界面。
+     *
+     * @return 会话仍存在时为 true，可以安全跳转
+     */
+    suspend fun verifyConversation(id: Uuid): Boolean {
+        // 只查删除标记，不把整条会话读回内存；读库异常时按存在处理，避免误删选择
+        val deletedAt = runCatching { conversationRepository.getDeletedAtById(id) }
+            .getOrElse { return true }
+        if (deletedAt == 0L) return true
+        if (order.remove(id)) {
+            loaded.remove(id)
+            rebuild()
+        }
+        _events.trySend(ComparisonEvent.ConversationsMissing(1))
+        return false
     }
 
     private fun rebuild() {
@@ -126,6 +196,9 @@ class ComparisonVM(
                     missingCount = missing.size,
                     failed = false,
                 )
+            }
+            if (missing.isNotEmpty()) {
+                _events.trySend(ComparisonEvent.ConversationsMissing(missing.size))
             }
 
             // 建图要算哈希和指纹，放到后台；hash 自己再切 IO，避免主线程卡住
