@@ -1812,10 +1812,12 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="comparison_hashing">正在读取本地附件…</string>
   <string name="comparison_empty">暂无可对比的内容</string>
   <string name="comparison_failed">构建对比失败</string>
+  <string name="comparison_no_common_start">这些会话没有共同开头</string>
   <string name="comparison_missing">已移出 %1$d 个不存在的会话</string>
   <string name="comparison_remove">移出对比</string>
   <string name="comparison_add">添加</string>
   <string name="comparison_untitled">未命名</string>
+  <string name="comparison_no_messages">无消息</string>
   <string name="comparison_endpoint">终点</string>
   <string name="comparison_fork">分叉</string>
   <string name="comparison_shared_by">%1$d 条共有</string>

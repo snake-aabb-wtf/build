@@ -128,6 +128,19 @@ fun ComparisonPage(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
+            val graph = state.graph
+            if (graph != null &&
+                state.conversations.size > 1 &&
+                graph.rootIds.size == state.conversations.size
+            ) {
+                // 各自从不同的第一条消息开始：不合并，提示一下免得看起来像画错了
+                Text(
+                    text = stringResource(R.string.comparison_no_common_start),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
             ComparisonContent(
                 state = state,
                 onExpand = vm::expand,
@@ -164,12 +177,17 @@ private fun ComparisonToolbar(
                 } else {
                     summary.title
                 }
+                val label = if (summary.messageCount == 0) {
+                    "$title · ${stringResource(R.string.comparison_no_messages)}"
+                } else {
+                    title
+                }
                 InputChip(
                     selected = false,
                     onClick = {},
                     modifier = Modifier.widthIn(max = 240.dp),
                     label = {
-                        Text(text = title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(text = label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     },
                     trailingIcon = {
                         Icon(
