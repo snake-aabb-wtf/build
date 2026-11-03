@@ -135,7 +135,7 @@ fun ComparisonPage(
             ) {
                 // 各自从不同的第一条消息开始：不合并，提示一下免得看起来像画错了
                 Text(
-                    text = stringResource(R.string.comparison_no_common_start),
+                    text = stringResource(R.string.comparison_no_common_prefix),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
