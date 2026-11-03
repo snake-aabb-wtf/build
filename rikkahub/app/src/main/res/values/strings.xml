@@ -1820,6 +1820,10 @@
   <string name="comparison_fork">Fork</string>
   <string name="comparison_shared_by">Shared by %1$d</string>
   <string name="comparison_fold_more">+%1$d more</string>
+  <string name="comparison_expand_text">Show full message</string>
+  <string name="comparison_collapse_text">Show less</string>
+  <string name="comparison_depth">Depth %1$d</string>
+  <string name="comparison_reset_view">Reset view</string>
   <string name="comparison_checkpoint_title">Context checkpoint</string>
   <string name="comparison_role_user">User</string>
   <string name="comparison_role_assistant">Assistant</string>

@@ -1,6 +1,6 @@
 package me.rerere.rikkahub.data.model.comparison
 
-/** 一个节点在画布上的位置：x 由深度决定，y 由布局算法决定。 */
+/** 一个节点在画布上的位置：x 由深度决定，y 是卡片顶边（不是卡片中心）。 */
 data class LayoutPoint(val id: String, val x: Float, val y: Float)
 
 /**
@@ -53,6 +53,9 @@ fun timelineLayout(graph: ComparisonGraph, columnWidth: Float, laneHeight: Float
 
 /**
  * 显式栈的 DFS 后序遍历，避免上千层深的会话链把调用栈打爆。
+ *
+ * 产出的 y 语义统一为「卡片顶边」：叶子从 0 开始按 [rowHeight] 递增，内部节点取子节点 y 的中位/中点。
+ * 视图直接 `offset(y)` 即可，不再各自减半张卡高。
  *
  * @param internalY 由子节点 y（按 childIds 顺序）算出内部节点 y
  */

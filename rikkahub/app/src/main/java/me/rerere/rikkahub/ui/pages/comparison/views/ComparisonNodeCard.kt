@@ -2,11 +2,13 @@ package me.rerere.rikkahub.ui.pages.comparison.views
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -15,19 +17,28 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.ComparisonNode
 
-/** 三种视图共用的节点卡：角色、正文、分叉描边、会话终点标记。 */
+/**
+ * 三种视图共用的节点卡：角色、来源、正文、分叉描边、会话终点标记。
+ *
+ * 卡片不再写死高度（大字号下会切正文），由 [minHeight] 撑住画布/时间线的排布间距；
+ * 头部标签数量有上限，超出的会话收成 `+N`，220dp 宽也不会溢出。
+ */
 @Composable
 fun ComparisonNodeCard(
     node: ComparisonNode,
@@ -35,6 +46,9 @@ fun ComparisonNodeCard(
     maxLines: Int,
     modifier: Modifier = Modifier,
     accent: Color? = null,
+    minHeight: Dp = 0.dp,
+    expandable: Boolean = false,
+    depth: Int? = null,
     onClick: () -> Unit = {},
 ) {
     if (node.message.isContextCheckpoint) {
@@ -43,6 +57,8 @@ fun ComparisonNodeCard(
             endpoint = endpoint,
             maxLines = maxLines,
             modifier = modifier,
+            minHeight = minHeight,
+            expandable = expandable,
             onClick = onClick,
         )
         return
@@ -56,7 +72,7 @@ fun ComparisonNodeCard(
 
     Surface(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.heightIn(min = minHeight),
         shape = RoundedCornerShape(14.dp),
         color = container,
         contentColor = content,
@@ -66,52 +82,147 @@ fun ComparisonNodeCard(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                if (accent != null) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .background(accent, CircleShape)
-                    )
-                }
-                Text(
-                    text = comparisonRoleLabel(node.message.role),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = content.copy(alpha = 0.7f),
-                    maxLines = 1,
-                )
-                if (node.occurrences.size > 1) {
-                    Text(
-                        text = stringResource(R.string.comparison_shared_by, node.occurrences.size),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = content.copy(alpha = 0.7f),
-                        maxLines = 1,
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                if (isFork) {
-                    Text(
-                        text = stringResource(R.string.comparison_fork),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.primary,
-                        maxLines = 1,
-                    )
-                }
-                if (endpoint) {
-                    EndpointBadge()
-                }
-            }
-            Text(
-                text = comparisonNodeText(node),
-                style = MaterialTheme.typography.bodyMedium,
-                color = content,
+            CardHeader(
+                node = node,
+                endpoint = endpoint,
+                isFork = isFork,
+                accent = accent,
+                depth = depth,
+                content = content,
+            )
+            NodeBody(
+                node = node,
                 maxLines = maxLines,
+                expandable = expandable,
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CardHeader(
+    node: ComparisonNode,
+    endpoint: Boolean,
+    isFork: Boolean,
+    accent: Color?,
+    depth: Int?,
+    content: Color,
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (accent != null) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(accent, CircleShape)
+            )
+        }
+        Text(
+            text = comparisonRoleLabel(node.message.role),
+            style = MaterialTheme.typography.labelSmall,
+            color = content.copy(alpha = 0.7f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (node.occurrences.size > 1) {
+            Text(
+                text = stringResource(R.string.comparison_shared_by, node.occurrences.size),
+                style = MaterialTheme.typography.labelSmall,
+                color = content.copy(alpha = 0.7f),
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (depth != null && depth > 0) {
+            Text(
+                text = stringResource(R.string.comparison_depth, depth),
+                style = MaterialTheme.typography.labelSmall,
+                color = content.copy(alpha = 0.7f),
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        if (isFork) {
+            Text(
+                text = stringResource(R.string.comparison_fork),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.primary,
+                maxLines = 1,
+            )
+        }
+        if (endpoint) {
+            EndpointBadge()
+        }
+    }
+
+    val sourceTitles = node.occurrences
+        .map { occurrence ->
+            occurrence.conversationTitle.ifBlank { stringResource(R.string.comparison_untitled) }
+        }
+        .distinct()
+    if (sourceTitles.isNotEmpty()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            // 来源标签最多两个，剩下收成 +N，避免标题把卡片挤爆
+            sourceTitles.take(2).forEach { title ->
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = content.copy(alpha = 0.55f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            }
+            if (sourceTitles.size > 2) {
+                Text(
+                    text = "+" + (sourceTitles.size - 2),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = content.copy(alpha = 0.55f),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NodeBody(
+    node: ComparisonNode,
+    maxLines: Int,
+    expandable: Boolean,
+    content: Color,
+) {
+    var expanded by remember(node.id) { mutableStateOf(false) }
+    var overflowed by remember(node.id) { mutableStateOf(false) }
+    val body = comparisonNodeText(node)
+
+    Text(
+        text = body,
+        style = MaterialTheme.typography.bodyMedium,
+        color = content,
+        maxLines = if (expanded) Int.MAX_VALUE else maxLines,
+        overflow = TextOverflow.Ellipsis,
+        onTextLayout = { layout ->
+            if (!expanded) overflowed = layout.hasVisualOverflow
+        },
+    )
+    if (expandable && (overflowed || expanded)) {
+        Text(
+            text = stringResource(
+                if (expanded) R.string.comparison_collapse_text else R.string.comparison_expand_text
+            ),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable { expanded = !expanded },
+        )
     }
 }
 
@@ -122,12 +233,14 @@ private fun ComparisonCheckpointCard(
     endpoint: Boolean,
     maxLines: Int,
     modifier: Modifier = Modifier,
+    minHeight: Dp = 0.dp,
+    expandable: Boolean = false,
     onClick: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
     Surface(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.heightIn(min = minHeight),
         shape = RoundedCornerShape(14.dp),
         color = colors.tertiaryContainer,
         contentColor = colors.onTertiaryContainer,
@@ -144,41 +257,69 @@ private fun ComparisonCheckpointCard(
                     text = stringResource(R.string.comparison_checkpoint_title),
                     style = MaterialTheme.typography.labelMedium,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.weight(1f))
                 if (endpoint) EndpointBadge()
             }
-            Text(
-                text = comparisonNodeText(node),
-                style = MaterialTheme.typography.bodySmall,
+            NodeBody(
+                node = node,
                 maxLines = maxLines,
-                overflow = TextOverflow.Ellipsis,
+                expandable = expandable,
+                content = colors.onTertiaryContainer,
             )
         }
     }
 }
 
-/** 子树被折叠时的占位：点开后再画子树。 */
+/**
+ * 子树被折叠时的占位：卡片本身照常画，chip 放在子节点列，点一次展开整棵子树。
+ *
+ * @param hiddenCount 被藏起来的后代数量（子树大小 - 1）
+ */
 @Composable
 fun ComparisonFoldChip(
     hiddenCount: Int,
     modifier: Modifier = Modifier,
+    endpoint: Boolean = false,
+    fork: Boolean = false,
     onClick: () -> Unit = {},
 ) {
+    val colors = MaterialTheme.colorScheme
     Surface(
         onClick = onClick,
         modifier = modifier,
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = colors.surfaceVariant,
+        contentColor = colors.onSurfaceVariant,
+        border = BorderStroke(1.dp, colors.outlineVariant),
     ) {
-        Text(
-            text = stringResource(R.string.comparison_fold_more, hiddenCount),
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            maxLines = 1,
-        )
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.comparison_fold_more, hiddenCount),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+            )
+            if (fork) {
+                Text(
+                    text = stringResource(R.string.comparison_fork),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.primary,
+                    maxLines = 1,
+                )
+            }
+            if (endpoint) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(colors.tertiary, CircleShape)
+                )
+            }
+        }
     }
 }
 
@@ -237,30 +378,4 @@ fun comparisonNodeText(node: ComparisonNode): String {
         is UIMessagePart.Reasoning -> stringResource(R.string.comparison_part_reasoning)
         else -> stringResource(R.string.comparison_part_empty)
     }
-}
-
-/** 折叠阈值：子树大于这个节点数的节点在画布/时间线里先收成 `+N` 占位。 */
-internal const val FOLD_SUBTREE_THRESHOLD = 300
-
-/** 子树超过阈值且没被展开的节点。 */
-internal fun foldedNodeIds(
-    graph: ComparisonGraph,
-    sizes: Map<String, Int>,
-    expanded: Set<String>,
-): Set<String> = sizes
-    .filter { (id, size) -> size > FOLD_SUBTREE_THRESHOLD && id !in expanded && graph.nodes.containsKey(id) }
-    .keys
-
-/** 折叠后仍然可见的节点：折叠节点的后代不参与绘制。 */
-internal fun visibleNodeIds(graph: ComparisonGraph, folded: Set<String>): Set<String> {
-    val visible = HashSet<String>(graph.nodes.size)
-    val stack = ArrayDeque<String>()
-    graph.rootIds.forEach { stack.addLast(it) }
-    while (stack.isNotEmpty()) {
-        val id = stack.removeLast()
-        if (!visible.add(id)) continue
-        if (id in folded) continue
-        graph.nodes[id]?.childIds?.forEach { stack.addLast(it) }
-    }
-    return visible
 }

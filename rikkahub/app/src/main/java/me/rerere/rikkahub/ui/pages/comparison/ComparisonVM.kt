@@ -47,6 +47,13 @@ data class ComparisonCandidate(
     val title: String,
 )
 
+/** 画布/时间线的视图状态：放在 VM 里，旋转、切换视图、换图都不重置。 */
+data class ComparisonViewport(
+    val scale: Float = 1f,
+    val panX: Float = 0f,
+    val panY: Float = 0f,
+)
+
 data class ComparisonUiState(
     val loading: Boolean = true,
     val hashing: Boolean = false,
@@ -54,6 +61,10 @@ data class ComparisonUiState(
     val conversations: List<ComparisonConversationSummary> = emptyList(),
     val viewMode: ComparisonViewMode = ComparisonViewMode.INDENTED,
     val expanded: Set<String> = emptySet(),
+    /** 画布视图的缩放/平移；pan 单位是像素。 */
+    val canvasViewport: ComparisonViewport = ComparisonViewport(),
+    /** 时间线视图的平移（scale 恒为 1）。 */
+    val timelineViewport: ComparisonViewport = ComparisonViewport(),
     /** 加载时已经不存在、被移出对比的会话数 */
     val missingCount: Int = 0,
     val failed: Boolean = false,
@@ -125,6 +136,14 @@ class ComparisonVM(
 
     fun setViewMode(mode: ComparisonViewMode) {
         _state.update { if (it.viewMode == mode) it else it.copy(viewMode = mode) }
+    }
+
+    fun setCanvasViewport(viewport: ComparisonViewport) {
+        _state.update { if (it.canvasViewport == viewport) it else it.copy(canvasViewport = viewport) }
+    }
+
+    fun setTimelineViewport(viewport: ComparisonViewport) {
+        _state.update { if (it.timelineViewport == viewport) it else it.copy(timelineViewport = viewport) }
     }
 
     /**

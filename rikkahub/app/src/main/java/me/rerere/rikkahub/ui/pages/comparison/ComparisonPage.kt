@@ -61,6 +61,7 @@ import me.rerere.rikkahub.data.model.comparison.timelineLayout
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.pages.comparison.views.CanvasTreeView
+import me.rerere.rikkahub.ui.pages.comparison.views.ComparisonMetrics
 import me.rerere.rikkahub.ui.pages.comparison.views.IndentedTreeView
 import me.rerere.rikkahub.ui.pages.comparison.views.TimelineView
 import me.rerere.rikkahub.ui.pages.comparison.views.comparisonNodeText
@@ -70,11 +71,7 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 import kotlin.uuid.Uuid
 
-// 布局用的列宽/行高，和视图里的卡片尺寸配套
-private const val TidyColumnDp = 260f
-private const val TidyRowDp = 140f
-private const val TimelineColumnDp = 320f
-private const val TimelineLaneDp = 140f
+// 布局用的列宽/行高由 ComparisonMetrics 统一提供，三个视图共用一份数字
 
 @Composable
 fun ComparisonPage(
@@ -92,6 +89,7 @@ fun ComparisonPage(
 
     var showPicker by remember { mutableStateOf(false) }
     var occurrenceNode by remember { mutableStateOf<ComparisonNode?>(null) }
+    val metrics = remember { ComparisonMetrics() }
 
     LaunchedEffect(vm) {
         vm.events.collect { event ->
@@ -197,8 +195,11 @@ fun ComparisonPage(
             }
             ComparisonContent(
                 state = state,
+                metrics = metrics,
                 onExpand = vm::expand,
                 onNodeClick = handleNodeClick,
+                onCanvasViewportChange = vm::setCanvasViewport,
+                onTimelineViewportChange = vm::setTimelineViewport,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
@@ -352,8 +353,11 @@ private fun ComparisonToolbar(
 @Composable
 private fun ComparisonContent(
     state: ComparisonUiState,
+    metrics: ComparisonMetrics,
     onExpand: (String) -> Unit,
     onNodeClick: (ComparisonNode) -> Unit,
+    onCanvasViewportChange: (ComparisonViewport) -> Unit,
+    onTimelineViewportChange: (ComparisonViewport) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val graph = state.graph
@@ -376,7 +380,9 @@ private fun ComparisonContent(
         )
 
         else -> {
-            val tidy = remember(graph) { tidyLayout(graph, TidyColumnDp, TidyRowDp) }
+            val tidy = remember(graph, metrics) {
+                tidyLayout(graph, metrics.columnWidth.value, metrics.rowHeight.value)
+            }
             if (tidy.points.isEmpty()) {
                 ComparisonPlaceholder(
                     text = stringResource(R.string.comparison_empty),
@@ -389,6 +395,7 @@ private fun ComparisonContent(
                     ComparisonViewMode.INDENTED -> IndentedTreeView(
                         graph = graph,
                         endpointIds = endpoints,
+                        metrics = metrics,
                         expanded = state.expanded,
                         onExpand = onExpand,
                         onNodeClick = onNodeClick,
@@ -401,14 +408,21 @@ private fun ComparisonContent(
                         sizes = sizes,
                         endpointIds = endpoints,
                         expanded = state.expanded,
+                        viewport = state.canvasViewport,
+                        onViewportChange = onCanvasViewportChange,
                         onExpand = onExpand,
                         onNodeClick = onNodeClick,
+                        metrics = metrics,
                         modifier = modifier,
                     )
 
                     ComparisonViewMode.TIMELINE -> {
-                        val timeline = remember(graph) {
-                            timelineLayout(graph, TimelineColumnDp, TimelineLaneDp)
+                        val timeline = remember(graph, metrics) {
+                            timelineLayout(
+                                graph,
+                                metrics.timelineColumnWidth.value,
+                                metrics.timelineLaneHeight.value,
+                            )
                         }
                         TimelineView(
                             graph = graph,
@@ -416,8 +430,11 @@ private fun ComparisonContent(
                             sizes = sizes,
                             endpointIds = endpoints,
                             expanded = state.expanded,
+                            viewport = state.timelineViewport,
+                            onViewportChange = onTimelineViewportChange,
                             onExpand = onExpand,
                             onNodeClick = onNodeClick,
+                            metrics = metrics,
                             modifier = modifier,
                         )
                     }
