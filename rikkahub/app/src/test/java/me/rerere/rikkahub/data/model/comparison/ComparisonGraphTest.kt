@@ -85,16 +85,19 @@ class ComparisonGraphTest {
 
     @Test
     fun `repeated identical consecutive messages create two nodes`() = runTest {
-        val a = conversation("A", user("same"), assistant("same"), user("same"))
+        val a = conversation("A", user("same"), user("same"))
 
         val graph = buildComparisonGraph(listOf(a), noFiles)
 
-        assertEquals(3, graph.nodes.size)
+        assertEquals(2, graph.nodes.size)
         assertEquals(1, graph.rootIds.size)
         val depths = graph.nodes.values.sortedBy { it.depth }
-        assertEquals(listOf(0, 1, 2), depths.map { it.depth })
-        assertEquals(listOf(1, 1, 1), depths.map { it.childIds.size })
+        assertEquals(listOf(0, 1), depths.map { it.depth })
+        assertEquals(listOf(1, 0), depths.map { it.childIds.size })
         assertTrue(graph.nodes.values.all { it.occurrences.size == 1 })
+        // 第二个节点的父是第一个节点：同样内容在不同深度不能并成一个节点
+        val child = depths.last()
+        assertEquals(depths.first().id, child.parentId)
     }
 
     @Test
