@@ -4,6 +4,7 @@ import kotlinx.coroutines.test.runTest
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.comparison.FileHasher
+import me.rerere.rikkahub.data.model.comparison.LayoutPoint
 import me.rerere.rikkahub.data.model.comparison.buildComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.subtreeSizes
 import me.rerere.rikkahub.data.model.comparison.tidyLayout
@@ -11,6 +12,7 @@ import me.rerere.rikkahub.data.model.comparison.timelineLayout
 import me.rerere.rikkahub.data.model.toMessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.uuid.Uuid
@@ -195,6 +197,132 @@ class ComparisonVisibilityTest {
         assertEquals(100f, clampPanAxis(value = 999f, contentPx = 300f, viewportPx = 500f), 0.001f)
         val large = clampPanAxis(value = 999_999f, contentPx = 3000f, viewportPx = 500f)
         assertTrue(large <= 250f)
+    }
+
+    @Test
+    fun `visible nodes are capped and report how many were dropped`() {
+        val points = (0 until 200).associate { index ->
+            val id = "n$index"
+            id to LayoutPoint(id = id, x = (index % 20) * 300f, y = (index / 20) * 200f)
+        }
+        val world = WorldRect(-1_000_000f, -1_000_000f, 1_000_000f, 1_000_000f)
+
+        val capped = visibleInViewportCapped(points, points.keys, world, 220f, 200f, limit = 80)
+
+        assertEquals(80, capped.ids.size)
+        assertEquals(120, capped.hiddenCount)
+        // 按 (y, x) 取最靠上的：前四行整行都在，最后一行不该出现
+        assertTrue("n79" in capped.ids)
+        assertFalse("n199" in capped.ids)
+
+        val uncapped = visibleInViewportCapped(points, points.keys.take(10).toSet(), world, 220f, 200f, limit = 80)
+        assertEquals(10, uncapped.ids.size)
+        assertEquals(0, uncapped.hiddenCount)
+    }
+
+    @Test
+    fun `cap keeps every node when the screen already fits`() = runTest {
+        val graph = buildComparisonGraph(
+            listOf(conversation("A", *Array(2000) { index -> "message $index" })),
+            noFiles,
+        )
+        val layout = tidyLayout(graph, columnWidth = 300f, rowHeight = 200f)
+        val world = visibleWorldRect(
+            viewportWidthPx = 1080f,
+            viewportHeightPx = 1920f,
+            density = 3f,
+            scale = MinCanvasScale,
+            panX = 0f,
+            panY = 0f,
+            marginDp = 220f,
+        )
+
+        val capped = visibleInViewportCapped(layout.points, layout.points.keys, world, 220f, 200f)
+        val plain = visibleInViewport(layout.points, layout.points.keys, world, 220f, 200f)
+
+        assertEquals(plain, capped.ids)
+        assertEquals(0, capped.hiddenCount)
+        assertTrue(capped.ids.size <= MAX_DRAWN_NODES)
+    }
+
+    @Test
+    fun `pan clamp accounts for content offset and centers small content`() {
+        // 内容占世界坐标 [100, 500]，视口 300：允许半屏过滚
+        assertEquals(50f, clampPan(9999f, startPx = 100f, endPx = 500f, viewportPx = 300f), 0.001f)
+        assertEquals(-350f, clampPan(-9999f, startPx = 100f, endPx = 500f, viewportPx = 300f), 0.001f)
+        // 内容比视口小：居中，并且减掉内容起点偏移
+        assertEquals(50f, clampPan(0f, startPx = 100f, endPx = 300f, viewportPx = 500f), 0.001f)
+        // 与原 clampPanAxis 语义一致
+        assertEquals(clampPanAxis(9999f, 300f, 500f), clampPan(9999f, 0f, 300f, 500f), 0.001f)
+    }
+
+    @Test
+    fun `content bounds only cover visible nodes`() {
+        val points = mapOf(
+            "a" to LayoutPoint("a", x = 0f, y = 0f),
+            "b" to LayoutPoint("b", x = 300f, y = 400f),
+            "hidden" to LayoutPoint("hidden", x = 9000f, y = 9000f),
+        )
+
+        val box = contentBounds(points, setOf("a", "b"), cardWidthDp = 220f, cardHeightDp = 200f)
+
+        assertEquals(WorldRect(left = 0f, top = 0f, right = 520f, bottom = 600f), box)
+        assertNull(contentBounds(points, emptySet(), 220f, 200f))
+    }
+
+    @Test
+    fun `fit viewport centers content and never magnifies past one`() {
+        val fitted = fitViewport(
+            contentWidthPx = 1000f,
+            contentHeightPx = 500f,
+            viewportWidthPx = 500f,
+            viewportHeightPx = 500f,
+            bounds = WorldRect(left = 0f, top = 0f, right = 1000f, bottom = 500f),
+        )
+
+        assertEquals(0.5f, fitted.scale, 0.001f)
+        assertEquals(0f, fitted.panX, 0.001f)
+        assertEquals(125f, fitted.panY, 0.001f)
+
+        val small = fitViewport(
+            contentWidthPx = 100f,
+            contentHeightPx = 100f,
+            viewportWidthPx = 1000f,
+            viewportHeightPx = 1000f,
+            bounds = WorldRect(left = 0f, top = 0f, right = 100f, bottom = 100f),
+        )
+        assertEquals(1f, small.scale, 0.001f)
+        assertEquals(450f, small.panX, 0.001f)
+
+        // 内容起点不在 0：pan 要把起点偏移抵掉，否则首帧整块偏到一边
+        val offset = fitViewport(
+            contentWidthPx = 400f,
+            contentHeightPx = 400f,
+            viewportWidthPx = 1000f,
+            viewportHeightPx = 1000f,
+            bounds = WorldRect(left = 200f, top = 200f, right = 600f, bottom = 600f),
+        )
+        assertEquals(100f, offset.panX, 0.001f)
+        assertEquals(100f, offset.panY, 0.001f)
+    }
+
+    @Test
+    fun `fit pan starts at the content edge when it is wider than the viewport`() {
+        assertEquals(0f, fitPan(contentPx = 400f, viewportPx = 300f, startPx = 0f), 0.001f)
+        assertEquals(50f, fitPan(contentPx = 200f, viewportPx = 300f), 0.001f)
+        assertEquals(-50f, fitPan(contentPx = 200f, viewportPx = 300f, startPx = 100f), 0.001f)
+    }
+
+    @Test
+    fun `chain flags stop at the visible indent depth`() {
+        var chain = emptyList<Boolean>()
+        repeat(200) { index -> chain = appendChain(chain, continuesBelow = index % 2 == 0) }
+
+        assertEquals(MAX_CHAIN_DEPTH, chain.size)
+        assertEquals(listOf(true, false, true), appendChain(listOf(true, false), continuesBelow = true))
+        // 截断保留的是最外层的前缀，连线不错位
+        assertEquals(true, chain.first())
+        assertEquals(false, chain[1])
     }
 
     private fun conversation(title: String, vararg texts: String) = Conversation(

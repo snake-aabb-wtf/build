@@ -14,10 +14,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -34,9 +40,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.ComparisonLayout
@@ -94,10 +102,14 @@ fun TimelineView(
     val titles = remember(graph, points, laneHeight, laneCount) {
         laneTitles(graph, points, laneHeight.value, laneCount)
     }
-    val maxX = remember(points) { points.values.maxOf { it.x } }
-    val maxY = remember(points) { points.values.maxOf { it.y } }
-    val contentWidthDp = maxX + cardWidth.value + 16f
-    val contentHeightDp = max(maxY + cardHeight.value, laneCount * laneHeight.value) + 16f
+    // 包围盒取折叠后的可见节点；lane 底色仍按全量 lane 数铺，避免标题列和底色对不上
+    val bounds = remember(points, visible, cardWidth, laneHeight) {
+        contentBounds(points, visible, cardWidth.value, laneHeight.value)
+    }
+    val contentHeightDp = max(
+        bounds?.bottom ?: 0f,
+        laneCount * laneHeight.value,
+    )
 
     fun laneIndex(yDp: Float): Int =
         (yDp / laneHeight.value).roundToInt().coerceIn(0, laneCount - 1)
@@ -110,12 +122,62 @@ fun TimelineView(
         val densityValue = density.density
         val headerPx = with(density) { metrics.laneHeaderWidth.toPx() }
         val contentViewportPx = (widthPx - headerPx).coerceAtLeast(1f)
-        val contentWidthPx = contentWidthDp * densityValue
-        val contentHeightPx = contentHeightDp * densityValue
-        val latestContentSize by rememberUpdatedState(contentWidthPx to contentHeightPx)
+        val latestBounds by rememberUpdatedState(bounds)
+        val latestDensity by rememberUpdatedState(densityValue)
         val latestContentViewport by rememberUpdatedState(contentViewportPx to heightPx)
         val panX = viewport.panX
         val panY = viewport.panY
+
+        fun fit(): ComparisonViewport {
+            val box = bounds ?: return ComparisonViewport()
+            return ComparisonViewport(
+                scale = 1f,
+                panX = fitPan(
+                    contentPx = (box.right - box.left) * densityValue,
+                    viewportPx = contentViewportPx,
+                    startPx = box.left * densityValue,
+                ),
+                panY = fitPan(
+                    contentPx = (box.bottom - box.top) * densityValue,
+                    viewportPx = heightPx,
+                    startPx = box.top * densityValue,
+                ),
+            )
+        }
+
+        val latestFit by rememberUpdatedState(fit())
+        // 首次进入 / 换图时按内容 fit 一次
+        val fitted = remember(graph) { mutableStateOf(false) }
+
+        LaunchedEffect(bounds, contentHeightDp, contentViewportPx, heightPx) {
+            if (!fitted.value) {
+                if (bounds != null && contentViewportPx > 0f && heightPx > 0f) {
+                    fitted.value = true
+                    latestOnChange(fit())
+                }
+                return@LaunchedEffect
+            }
+            // 换图/旋转后旧 pan 可能整块在屏外：按当前包围盒重新限位
+            val box = latestBounds ?: return@LaunchedEffect
+            val unit = latestDensity
+            val current = latestViewport
+            val newPanX = clampPan(
+                value = current.panX,
+                startPx = box.left * unit,
+                endPx = box.right * unit,
+                viewportPx = latestContentViewport.first,
+            )
+            val newPanY = clampPan(
+                value = current.panY,
+                startPx = box.top * unit,
+                endPx = box.bottom * unit,
+                viewportPx = latestContentViewport.second,
+            )
+            if (newPanX != current.panX || newPanY != current.panY) {
+                latestOnChange(current.copy(panX = newPanX, panY = newPanY))
+            }
+        }
+
         val world = visibleWorldRect(
             viewportWidthPx = contentViewportPx,
             viewportHeightPx = heightPx,
@@ -123,15 +185,15 @@ fun TimelineView(
             scale = 1f,
             panX = panX,
             panY = panY,
-            marginDp = max(cardWidth.value, cardHeight.value),
+            marginDp = max(cardWidth.value, laneHeight.value),
         )
-        val drawnIds = remember(points, visible, world, cardWidth, cardHeight) {
-            visibleInViewport(
+        val drawn = remember(points, visible, world, cardWidth, laneHeight) {
+            visibleInViewportCapped(
                 points = points,
                 candidates = visible,
                 world = world,
                 cardWidthDp = cardWidth.value,
-                cardHeightDp = cardHeight.value,
+                cardHeightDp = laneHeight.value,
             )
         }
 
@@ -142,19 +204,31 @@ fun TimelineView(
                     detectDragGestures { change, drag ->
                         change.consume()
                         val old = latestViewport
+                        val box = latestBounds
+                        val unit = latestDensity
                         latestOnChange(
                             ComparisonViewport(
                                 scale = 1f,
-                                panX = clampPanAxis(
-                                    value = old.panX + drag.x,
-                                    contentPx = latestContentSize.first,
-                                    viewportPx = latestContentViewport.first,
-                                ),
-                                panY = clampPanAxis(
-                                    value = old.panY + drag.y,
-                                    contentPx = latestContentSize.second,
-                                    viewportPx = latestContentViewport.second,
-                                ),
+                                panX = if (box == null) {
+                                    old.panX + drag.x
+                                } else {
+                                    clampPan(
+                                        value = old.panX + drag.x,
+                                        startPx = box.left * unit,
+                                        endPx = box.right * unit,
+                                        viewportPx = latestContentViewport.first,
+                                    )
+                                },
+                                panY = if (box == null) {
+                                    old.panY + drag.y
+                                } else {
+                                    clampPan(
+                                        value = old.panY + drag.y,
+                                        startPx = box.top * unit,
+                                        endPx = box.bottom * unit,
+                                        viewportPx = latestContentViewport.second,
+                                    )
+                                },
                             )
                         )
                     }
@@ -174,7 +248,7 @@ fun TimelineView(
                     drawTimelineEdges(
                         graph = graph,
                         points = points,
-                        drawnIds = drawnIds,
+                        drawnIds = drawn.ids,
                         color = edgeColor,
                         laneColor = { point -> laneColor(laneIndex(point.y)) },
                         density = densityValue,
@@ -187,46 +261,71 @@ fun TimelineView(
                 }
             }
 
-            points.values.forEach { point ->
-                if (point.id !in drawnIds) return@forEach
-                val node = graph.nodes[point.id] ?: return@forEach
-                val screenX = (headerPx + point.x * densityValue + panX).roundToInt()
-                val screenY = (point.y * densityValue + panY).roundToInt()
-                val accent = laneColor(laneIndex(point.y))
+            // 卡片层裁在标题列右边：panX 为负时，卡片滑到标题列下面的部分不能可点
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = metrics.laneHeaderWidth)
+                    .clipToBounds()
+            ) {
+                points.values.forEach { point ->
+                    if (point.id !in drawn.ids) return@forEach
+                    val node = graph.nodes[point.id] ?: return@forEach
+                    key(point.id) {
+                        val screenX = (point.x * densityValue + panX).roundToInt()
+                        val screenY = (point.y * densityValue + panY).roundToInt()
+                        val accent = laneColor(laneIndex(point.y))
 
-                ComparisonNodeCard(
-                    node = node,
-                    endpoint = point.id in endpointIds,
-                    maxLines = 4,
-                    minHeight = cardHeight,
-                    accent = accent,
-                    modifier = Modifier
-                        .offset { IntOffset(screenX, screenY) }
-                        .width(cardWidth),
-                    onClick = { onNodeClick(node) },
-                )
+                        ComparisonNodeCard(
+                            node = node,
+                            endpoint = point.id in endpointIds,
+                            maxLines = 4,
+                            minHeight = cardHeight,
+                            accent = accent,
+                            modifier = Modifier
+                                .offset { IntOffset(screenX, screenY) }
+                                .width(cardWidth),
+                            onClick = { onNodeClick(node) },
+                        )
 
-                if (point.id in folded) {
-                    val anchor = node.childIds.firstOrNull()?.let { points[it] } ?: point
-                    if (!intersectsViewport(anchor, world, cardWidth.value, cardHeight.value)) {
-                        return@forEach
+                        if (point.id in folded) {
+                            val anchor = node.childIds.firstOrNull()?.let { points[it] } ?: point
+                            if (intersectsViewport(anchor, world, cardWidth.value, laneHeight.value)) {
+                                ComparisonFoldChip(
+                                    hiddenCount = foldHiddenCount(sizes, point.id),
+                                    endpoint = point.id in endpointIds,
+                                    fork = node.childIds.size > 1,
+                                    modifier = Modifier.offset {
+                                        IntOffset(
+                                            (anchor.x * densityValue + panX).roundToInt(),
+                                            (anchor.y * densityValue + panY).roundToInt(),
+                                        )
+                                    },
+                                    onClick = { onExpand(point.id) },
+                                )
+                            }
+                        }
                     }
-                    ComparisonFoldChip(
-                        hiddenCount = foldHiddenCount(sizes, point.id),
-                        endpoint = point.id in endpointIds,
-                        fork = node.childIds.size > 1,
-                        modifier = Modifier.offset {
-                            IntOffset(
-                                (headerPx + anchor.x * densityValue + panX).roundToInt(),
-                                (anchor.y * densityValue + panY).roundToInt(),
+                }
+
+                if (drawn.hiddenCount > 0) {
+                    Text(
+                        text = stringResource(R.string.comparison_hidden_nodes, drawn.hiddenCount),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(16.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(8.dp),
                             )
-                        },
-                        onClick = { onExpand(point.id) },
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                     )
                 }
             }
 
-            // 固定泳道标题列，盖在卡片之上，横向平移时不跟着走
+            // 固定泳道标题列，盖在卡片之上，横向平移时不跟着走；同时吃掉手势，避免点穿到下面的卡片
             LaneHeader(
                 titles = titles,
                 laneColors = laneColors,
@@ -236,6 +335,18 @@ fun TimelineView(
                 headerWidth = metrics.laneHeaderWidth,
                 modifier = Modifier.align(Alignment.TopStart),
             )
+
+            FilledTonalIconButton(
+                onClick = { onViewportChange(latestFit) },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Refresh01,
+                    contentDescription = stringResource(R.string.comparison_reset_view),
+                )
+            }
         }
     }
 }
@@ -256,6 +367,14 @@ private fun LaneHeader(
             .width(headerWidth)
             .fillMaxHeight()
             .background(colors.surface)
+            // 标题列不参与平移：必须消费触摸，否则会点到下面被裁掉的卡片
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent().changes.forEach { change -> change.consume() }
+                    }
+                }
+            }
     ) {
         Box(
             modifier = Modifier

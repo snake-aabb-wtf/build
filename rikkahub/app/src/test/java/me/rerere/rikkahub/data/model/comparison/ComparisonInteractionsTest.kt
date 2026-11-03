@@ -3,9 +3,11 @@ package me.rerere.rikkahub.data.model.comparison
 import kotlinx.coroutines.test.runTest
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.toMessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -19,6 +21,51 @@ class ComparisonInteractionsTest {
         title = title,
         messageNodes = texts.map { UIMessage.user(it).toMessageNode() },
     )
+
+    @Test
+    fun `branch signature follows the selected branch`() {
+        val node = MessageNode(
+            messages = listOf(UIMessage.user("branch a"), UIMessage.user("branch b")),
+            selectIndex = 0,
+        )
+        val base = Conversation(
+            assistantId = Uuid.random(),
+            messageNodes = listOf(UIMessage.user("hi").toMessageNode(), node),
+        )
+
+        val switched = base.copy(
+            messageNodes = listOf(base.messageNodes[0], node.copy(selectIndex = 1)),
+        )
+
+        assertNotEquals(branchSignature(base), branchSignature(switched))
+    }
+
+    @Test
+    fun `branch signature ignores title and timestamps`() {
+        val base = conversation("A", "hi", "hello")
+
+        val renamed = base.copy(
+            title = "renamed",
+            updateAt = Instant.parse("2030-01-01T00:00:00Z"),
+        )
+
+        assertEquals(branchSignature(base), branchSignature(renamed))
+    }
+
+    @Test
+    fun `branch signature tracks node count and last message id`() {
+        val base = conversation("A", "hi", "hello")
+        val longer = conversation("A", "hi", "hello", "again")
+
+        assertNotEquals(branchSignature(base), branchSignature(longer))
+
+        val last = base.messageNodes.last()
+        val replacedLast = base.copy(
+            messageNodes = base.messageNodes.dropLast(1) +
+                last.copy(messages = listOf(UIMessage.user("regenerated"))),
+        )
+        assertNotEquals(branchSignature(base), branchSignature(replacedLast))
+    }
 
     @Test
     fun `toggle adds then removes an id`() {

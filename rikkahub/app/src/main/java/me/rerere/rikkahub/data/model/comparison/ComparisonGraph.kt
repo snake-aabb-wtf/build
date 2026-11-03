@@ -1,7 +1,9 @@
 package me.rerere.rikkahub.data.model.comparison
 
+import kotlinx.coroutines.ensureActive
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.model.Conversation
+import kotlin.coroutines.coroutineContext
 import kotlin.uuid.Uuid
 
 /** 某个会话走过某个节点：跳回时用 [messageNodeId] 定位到节点。 */
@@ -53,18 +55,17 @@ private class MutableNode(
  * 按「从根到该节点的路径逐字相同」合并多个会话，得到一棵前缀树。
  *
  * 只读取每个会话当前选中的消息；下标越界的节点跳过。每个节点最多一个父节点，分叉后不会回并。
+ *
+ * 消息指纹每次重算（纯字符串/JSON 规范化，微秒级）：context checkpoint 会原地改写内容而不换 id，
+ * 任何按键缓存都会拿到过期指纹，算错合并结果。只有附件内容哈希由 [FileHasher] 自己按文件缓存。
  */
 suspend fun buildComparisonGraph(
     conversations: List<Conversation>,
     fileHasher: FileHasher,
-    /**
-     * 跨重建复用的消息指纹缓存，键是 (会话 id, 消息 id)。消息重新生成或切换分支会换新 id，
-     * 自然失效；这里只省掉重复的 JSON 规范化与附件哈希，不改变合并结果。
-     */
-    fingerprints: MutableMap<Pair<Uuid, Uuid>, String>? = null,
 ): ComparisonGraph {
     val nodes = LinkedHashMap<String, MutableNode>()
     val rootIds = mutableListOf<String>()
+    var sinceCancelCheck = 0
 
     conversations.forEach { conversation ->
         var parentId: String? = null
@@ -72,10 +73,12 @@ suspend fun buildComparisonGraph(
         var siblings: MutableList<String> = rootIds
 
         for (messageNode in conversation.messageNodes) {
+            // 几千条消息的会话也要能中途取消，别把主线程/后台线程锁死到跑完
+            if (sinceCancelCheck++ % CANCEL_CHECK_INTERVAL == 0) {
+                coroutineContext.ensureActive()
+            }
             val message = messageNode.messages.getOrNull(messageNode.selectIndex) ?: continue
-            val cacheKey = conversation.id to message.id
-            val fingerprint = fingerprints?.get(cacheKey)
-                ?: messageFingerprint(message, fileHasher).also { fingerprints?.put(cacheKey, it) }
+            val fingerprint = messageFingerprint(message, fileHasher)
             val occurrence = NodeOccurrence(
                 conversationId = conversation.id,
                 conversationTitle = conversation.title,
@@ -112,6 +115,8 @@ suspend fun buildComparisonGraph(
         nodes = nodes.mapValues { (_, node) -> node.freeze() },
     )
 }
+
+private const val CANCEL_CHECK_INTERVAL = 64
 
 /** id 由父 id + 内容指纹派生，同一棵树里稳定可复现；哈希前缀冲突时追加序号。 */
 private fun newNodeId(

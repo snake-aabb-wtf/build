@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.comparison.views
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -9,11 +10,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -49,7 +55,7 @@ internal const val MaxCanvasScale = 3f
  *
  * 视口是容器尺寸，节点按世界坐标换算成屏幕偏移后再用 graphicsLayer 缩放；整图尺寸从不进
  * `Modifier.size()`，所以 2000 节点的长会话不会撞上 Compose 的 18 bit Constraints 上限。
- * 每帧只组合与视口相交（外扩一个卡片）的节点，首屏卡片数远小于 60。
+ * 每帧只组合与视口相交（外扩一个卡片）的节点，并按 (y, x) 截到 [MAX_DRAWN_NODES] 张。
  */
 @Composable
 fun CanvasTreeView(
@@ -76,21 +82,64 @@ fun CanvasTreeView(
     val latestOnChange by rememberUpdatedState(onViewportChange)
     val cardWidth = metrics.cardWidth
     val cardHeight = metrics.cardHeight
-    val maxX = remember(points) { points.values.maxOf { it.x } }
-    val maxY = remember(points) { points.values.maxOf { it.y } }
-    val contentWidthDp = maxX + cardWidth.value + 16f
-    val contentHeightDp = maxY + cardHeight.value + 16f
+    // 纵向按整行高度算：卡片实际能到 120~150dp，按 96 裁剪会在行间留缝
+    val rowHeight = metrics.rowHeight
+    // 包围盒取折叠后的可见节点：折叠掉的子树不该继续把画布拉长
+    val bounds = remember(points, visible, cardWidth, rowHeight) {
+        contentBounds(points, visible, cardWidth.value, rowHeight.value)
+    }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize().clipToBounds()) {
         val viewportWidthPx = constraints.maxWidth.toFloat()
         val viewportHeightPx = constraints.maxHeight.toFloat()
         val densityValue = density.density
         val scale = viewport.scale
-        val contentWidthPx = contentWidthDp * densityValue
-        val contentHeightPx = contentHeightDp * densityValue
-        // pointerInput(Unit) 的 lambda 只建一次，尺寸用最新值，避免分屏/旋转后限位用旧尺寸
-        val latestContentSize by rememberUpdatedState(contentWidthPx to contentHeightPx)
-        val latestViewSize by rememberUpdatedState(viewportWidthPx to viewportHeightPx)
+        val latestBounds by rememberUpdatedState(bounds)
+        val latestDensity by rememberUpdatedState(densityValue)
+        // 首次进入 / 换图时 fit 一次；旋转或缩放后只重新限位，不重置用户的视图
+        val fitted = remember(graph) { mutableStateOf(false) }
+
+        fun fit(): ComparisonViewport = bounds?.let { box ->
+            fitViewport(
+                contentWidthPx = (box.right - box.left) * densityValue,
+                contentHeightPx = (box.bottom - box.top) * densityValue,
+                viewportWidthPx = viewportWidthPx,
+                viewportHeightPx = viewportHeightPx,
+                bounds = box,
+            )
+        } ?: ComparisonViewport()
+
+        val latestFit by rememberUpdatedState(fit())
+
+        LaunchedEffect(bounds, scale, viewportWidthPx, viewportHeightPx) {
+            if (!fitted.value) {
+                if (bounds != null && viewportWidthPx > 0f && viewportHeightPx > 0f) {
+                    fitted.value = true
+                    latestOnChange(fit())
+                }
+                return@LaunchedEffect
+            }
+            // 换图/旋转沿用旧 pan 会首帧空白：按当前包围盒重新限位
+            val box = latestBounds ?: return@LaunchedEffect
+            val unit = latestDensity * scale
+            val current = latestViewport
+            val panX = clampPan(
+                value = current.panX,
+                startPx = box.left * unit,
+                endPx = box.right * unit,
+                viewportPx = viewportWidthPx,
+            )
+            val panY = clampPan(
+                value = current.panY,
+                startPx = box.top * unit,
+                endPx = box.bottom * unit,
+                viewportPx = viewportHeightPx,
+            )
+            if (panX != current.panX || panY != current.panY) {
+                latestOnChange(current.copy(panX = panX, panY = panY))
+            }
+        }
+
         val world = visibleWorldRect(
             viewportWidthPx = viewportWidthPx,
             viewportHeightPx = viewportHeightPx,
@@ -98,16 +147,16 @@ fun CanvasTreeView(
             scale = scale,
             panX = viewport.panX,
             panY = viewport.panY,
-            marginDp = max(cardWidth.value, cardHeight.value),
+            marginDp = max(cardWidth.value, rowHeight.value),
         )
-        // 先按折叠过滤，再按视口裁剪；两步都是纯函数，单测覆盖。
-        val drawnIds = remember(points, visible, world, cardWidth, cardHeight) {
-            visibleInViewport(
+        // 先按折叠过滤，再按视口裁剪并截断到上限；都是纯函数，单测覆盖。
+        val drawn = remember(points, visible, world, cardWidth, rowHeight) {
+            visibleInViewportCapped(
                 points = points,
                 candidates = visible,
                 world = world,
                 cardWidthDp = cardWidth.value,
-                cardHeightDp = cardHeight.value,
+                cardHeightDp = rowHeight.value,
             )
         }
 
@@ -122,26 +171,39 @@ fun CanvasTreeView(
                         // 以 centroid 为锚：该点下的世界坐标在缩放前后保持不动
                         val anchoredX = centroid.x - (centroid.x - old.panX) * ratio
                         val anchoredY = centroid.y - (centroid.y - old.panY) * ratio
+                        val box = latestBounds
+                        val unit = latestDensity * newScale
                         latestOnChange(
                             ComparisonViewport(
                                 scale = newScale,
-                                panX = clampPanAxis(
-                                    value = anchoredX + panChange.x,
-                                    contentPx = latestContentSize.first * newScale,
-                                    viewportPx = latestViewSize.first,
-                                ),
-                                panY = clampPanAxis(
-                                    value = anchoredY + panChange.y,
-                                    contentPx = latestContentSize.second * newScale,
-                                    viewportPx = latestViewSize.second,
-                                ),
+                                panX = if (box == null) {
+                                    anchoredX + panChange.x
+                                } else {
+                                    clampPan(
+                                        value = anchoredX + panChange.x,
+                                        startPx = box.left * unit,
+                                        endPx = box.right * unit,
+                                        viewportPx = size.width.toFloat(),
+                                    )
+                                },
+                                panY = if (box == null) {
+                                    anchoredY + panChange.y
+                                } else {
+                                    clampPan(
+                                        value = anchoredY + panChange.y,
+                                        startPx = box.top * unit,
+                                        endPx = box.bottom * unit,
+                                        viewportPx = size.height.toFloat(),
+                                    )
+                                },
                             )
                         )
                     }
                 }
                 .pointerInput(Unit) {
                     detectTapGestures(
-                        onDoubleTap = { latestOnChange(ComparisonViewport()) }
+                        // 双击回到 fit，而不是把大图缩成 1:1 只看得到第一列
+                        onDoubleTap = { latestOnChange(latestFit) }
                     )
                 }
         ) {
@@ -149,7 +211,7 @@ fun CanvasTreeView(
                 drawCanvasEdges(
                     graph = graph,
                     points = points,
-                    drawnIds = drawnIds,
+                    drawnIds = drawn.ids,
                     color = edgeColor,
                     density = densityValue,
                     scale = scale,
@@ -161,53 +223,71 @@ fun CanvasTreeView(
             }
 
             points.values.forEach { point ->
-                if (point.id !in drawnIds) return@forEach
+                if (point.id !in drawn.ids) return@forEach
                 val node = graph.nodes[point.id] ?: return@forEach
-                val screenX = (point.x * densityValue * scale + viewport.panX).roundToInt()
-                val screenY = (point.y * densityValue * scale + viewport.panY).roundToInt()
+                key(point.id) {
+                    val screenX = (point.x * densityValue * scale + viewport.panX).roundToInt()
+                    val screenY = (point.y * densityValue * scale + viewport.panY).roundToInt()
 
-                ComparisonNodeCard(
-                    node = node,
-                    endpoint = point.id in endpointIds,
-                    maxLines = 3,
-                    minHeight = cardHeight,
-                    modifier = Modifier
-                        .offset { IntOffset(screenX, screenY) }
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                            transformOrigin = TransformOrigin(0f, 0f)
-                        }
-                        .width(cardWidth),
-                    onClick = { onNodeClick(node) },
-                )
-
-                // 折叠的是子树，不是这个节点：卡片照常画，chip 落在子节点列
-                if (point.id in folded) {
-                    val anchor = node.childIds.firstOrNull()?.let { points[it] } ?: point
-                    if (!intersectsViewport(anchor, world, cardWidth.value, cardHeight.value)) {
-                        return@forEach
-                    }
-                    val chipX = (anchor.x * densityValue * scale + viewport.panX).roundToInt()
-                    val chipY = (anchor.y * densityValue * scale + viewport.panY).roundToInt()
-                    ComparisonFoldChip(
-                        hiddenCount = foldHiddenCount(sizes, point.id),
+                    ComparisonNodeCard(
+                        node = node,
                         endpoint = point.id in endpointIds,
-                        fork = node.childIds.size > 1,
+                        maxLines = 3,
+                        minHeight = cardHeight,
                         modifier = Modifier
-                            .offset { IntOffset(chipX, chipY) }
+                            .offset { IntOffset(screenX, screenY) }
                             .graphicsLayer {
                                 scaleX = scale
                                 scaleY = scale
                                 transformOrigin = TransformOrigin(0f, 0f)
-                            },
-                        onClick = { onExpand(point.id) },
+                            }
+                            .width(cardWidth),
+                        onClick = { onNodeClick(node) },
                     )
+
+                    // 折叠的是子树，不是这个节点：卡片照常画，chip 落在子节点列
+                    if (point.id in folded) {
+                        val anchor = node.childIds.firstOrNull()?.let { points[it] } ?: point
+                        if (intersectsViewport(anchor, world, cardWidth.value, rowHeight.value)) {
+                            val chipX = (anchor.x * densityValue * scale + viewport.panX).roundToInt()
+                            val chipY = (anchor.y * densityValue * scale + viewport.panY).roundToInt()
+                            ComparisonFoldChip(
+                                hiddenCount = foldHiddenCount(sizes, point.id),
+                                endpoint = point.id in endpointIds,
+                                fork = node.childIds.size > 1,
+                                modifier = Modifier
+                                    .offset { IntOffset(chipX, chipY) }
+                                    .graphicsLayer {
+                                        scaleX = scale
+                                        scaleY = scale
+                                        transformOrigin = TransformOrigin(0f, 0f)
+                                    },
+                                onClick = { onExpand(point.id) },
+                            )
+                        }
+                    }
                 }
             }
 
+            if (drawn.hiddenCount > 0) {
+                // 画不下就明确告诉用户还有多少，放大后会出现
+                Text(
+                    text = stringResource(R.string.comparison_hidden_nodes, drawn.hiddenCount),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(16.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+
             FilledTonalIconButton(
-                onClick = { onViewportChange(ComparisonViewport()) },
+                onClick = { onViewportChange(fit()) },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp),

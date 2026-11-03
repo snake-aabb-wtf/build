@@ -30,8 +30,18 @@ import kotlin.math.roundToInt
 /** 可视缩进上限：再深的层级用「深度 N」徽标表达，避免 4300 层把卡片推出屏幕。 */
 internal const val MaxVisibleIndent = 60
 
-/** 横向滚动内容上限，`60000.dp * 4(density)` 仍在 Compose 的 18 bit Constraints 内。 */
-private val MaxIndentedContentWidth = 60000.dp
+/** 连接线最多需要的前缀层数（再深的部分不画，和 [MaxVisibleIndent] 一致）。 */
+internal const val MAX_CHAIN_DEPTH = MaxVisibleIndent
+
+/**
+ * 追加一层「父节点还有后续兄弟」的标记；超过 [MAX_CHAIN_DEPTH] 直接丢弃。
+ *
+ * 之前每行都 `chain + x` 是 O(depth)、深链总内存 O(n^2)；截断后每行最多 60 个元素。
+ */
+internal fun appendChain(chain: List<Boolean>, continuesBelow: Boolean): List<Boolean> {
+    if (chain.size >= MAX_CHAIN_DEPTH) return chain
+    return chain + continuesBelow
+}
 
 private class TreeRow(
     val node: ComparisonNode,
@@ -65,8 +75,7 @@ fun IndentedTreeView(
         rows.maxOfOrNull { min(it.depth, MaxVisibleIndent) } ?: 0
     }
     val contentWidth = remember(maxVisualDepth, metrics) {
-        (metrics.indentStep * maxVisualDepth + metrics.indentCardWidth + 16.dp)
-            .coerceAtMost(MaxIndentedContentWidth)
+        metrics.indentStep * maxVisualDepth + metrics.indentCardWidth + 16.dp
     }
 
     Box(
@@ -156,7 +165,7 @@ private fun buildRows(graph: ComparisonGraph): List<TreeRow> {
                 TreeRow(
                     node = child,
                     depth = row.depth + 1,
-                    chain = row.chain + !isLast,
+                    chain = appendChain(row.chain, continuesBelow = !isLast),
                     isLast = isLast,
                 )
             )

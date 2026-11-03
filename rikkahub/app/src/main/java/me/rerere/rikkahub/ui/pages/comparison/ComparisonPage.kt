@@ -32,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,7 +48,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
@@ -113,11 +115,21 @@ fun ComparisonPage(
         }
     }
 
-    // 从聊天页返回（或应用回到前台）时，只重建 updateAt 变了的会话
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        vm.syncWithCandidates(vm.candidates.value)
+    // 从聊天页返回（或应用回到前台）时重读会话。切分支/编辑消息不改 updateAt，
+    // 真正判断靠 VM 里的分支签名；这里只保证「本页可见」时才触发。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, vm) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME &&
+                lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            ) {
+                vm.syncWithCandidates(vm.candidates.value)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    // 返回瞬间候选列表可能还没重新发射，等它到齐再对一次 updateAt
+    // 返回瞬间候选列表可能还没重新发射，等它到齐再对一次签名
     LaunchedEffect(candidates) {
         vm.syncWithCandidates(candidates)
     }

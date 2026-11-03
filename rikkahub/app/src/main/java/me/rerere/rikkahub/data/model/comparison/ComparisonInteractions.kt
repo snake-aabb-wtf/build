@@ -108,9 +108,20 @@ fun hasNoCommonStart(
     return graph.rootIds.size == starts.size
 }
 
-/** 会话被移出对比后清掉它的指纹缓存，避免 Map 随着选择历史无限增长。 */
-fun MutableMap<Pair<Uuid, Uuid>, String>.forgetConversation(id: Uuid) {
-    keys.removeAll { it.first == id }
+/**
+ * 会话当前选中的分支签名：节点数 + 每个节点的 (id, selectIndex) + 最后一条消息 id。
+ *
+ * 切换分支、编辑消息都只改这些字段而不动 `updateAt`，所以从聊天页返回时不能只看时间戳。
+ */
+fun branchSignature(conversation: Conversation): String {
+    val builder = StringBuilder(conversation.messageNodes.size * 24)
+    builder.append(conversation.messageNodes.size).append('\u0000')
+    conversation.messageNodes.forEach { node ->
+        builder.append(node.id).append(':').append(node.selectIndex).append('\u0000')
+    }
+    val last = conversation.messageNodes.lastOrNull()
+    builder.append(last?.messages?.getOrNull(last.selectIndex)?.id ?: "-")
+    return builder.toString().sha256Hex()
 }
 
 /**

@@ -1830,6 +1830,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="comparison_collapse_text">收起</string>
   <string name="comparison_depth">深度 %1$d</string>
   <string name="comparison_reset_view">复位视图</string>
+  <string name="comparison_hidden_nodes">还有 %1$d 个节点未显示，放大查看</string>
   <string name="comparison_checkpoint_title">上下文压缩点</string>
   <string name="comparison_role_user">用户</string>
   <string name="comparison_role_assistant">助手</string>

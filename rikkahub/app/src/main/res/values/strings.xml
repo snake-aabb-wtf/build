@@ -1828,6 +1828,7 @@
   <string name="comparison_collapse_text">Show less</string>
   <string name="comparison_depth">Depth %1$d</string>
   <string name="comparison_reset_view">Reset view</string>
+  <string name="comparison_hidden_nodes">+%1$d more nodes — zoom in to see them</string>
   <string name="comparison_checkpoint_title">Context checkpoint</string>
   <string name="comparison_role_user">User</string>
   <string name="comparison_role_assistant">Assistant</string>

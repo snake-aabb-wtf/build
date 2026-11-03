@@ -29,16 +29,15 @@ import me.rerere.rikkahub.data.model.comparison.ComparisonCandidate
 import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.ConversationLoad
 import me.rerere.rikkahub.data.model.comparison.FileHasher
+import me.rerere.rikkahub.data.model.comparison.branchSignature
 import me.rerere.rikkahub.data.model.comparison.buildComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.canAddConversation
 import me.rerere.rikkahub.data.model.comparison.conversationLoad
 import me.rerere.rikkahub.data.model.comparison.expandedWithSubtree
-import me.rerere.rikkahub.data.model.comparison.forgetConversation
 import me.rerere.rikkahub.data.model.comparison.hasNoCommonStart
 import me.rerere.rikkahub.data.model.comparison.shouldDrop
 import me.rerere.rikkahub.data.model.localFileUrls
 import me.rerere.rikkahub.data.repository.ConversationRepository
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
 enum class ComparisonViewMode {
@@ -97,7 +96,8 @@ sealed interface ComparisonEvent {
  * 只读地加载选中的会话并建图。
  *
  * 会话读完一次就缓存在 [loaded] 里，增删会话只重建图，不再读数据库；附件哈希交给 [ComparisonFileHasher]
- * 按 (路径, 大小, 修改时间) 缓存，消息指纹按 (conversationId, messageId) 缓存并由 VM 持有。
+ * 按 (路径, 大小, 修改时间) 缓存。消息指纹每次重算：context checkpoint 会原地改写内容而不换 id，
+ * 以 (会话, 消息 id) 为键的消息级缓存必然拿到过期指纹。
  * 视图模式和会话 id 放进 [SavedStateHandle]，进程重建后还能恢复。
  */
 class ComparisonVM(
@@ -110,10 +110,11 @@ class ComparisonVM(
     private val order: MutableList<Uuid> = restoreIds(ids).toMutableList()
     private val loaded = HashMap<Uuid, Conversation>()
 
-    /** (conversationId, messageId) -> 指纹；跨 rebuild 复用，会话移出时按会话清理。 */
-    private val fingerprints = ConcurrentHashMap<Pair<Uuid, Uuid>, String>()
+    /** 读入时的分支签名，用来判断会话在聊天页里被切了分支/编辑过。 */
+    private val loadedSignatures = HashMap<Uuid, String>()
 
     private var buildJob: Job? = null
+    private var syncJob: Job? = null
 
     /** 每次 rebuild 自增；旧 job 即使还没被调度器停下，也不能再写状态或缓存。 */
     private var generation = 0
@@ -203,37 +204,88 @@ class ComparisonVM(
     /** 重新读一遍所有会话：会话可能在外部被改过（编辑、重新生成）。 */
     fun refresh() {
         loaded.clear()
-        // 手动重建时连指纹一起丢掉：消息可能在外部被原地编辑（id 不变、内容变了）
-        fingerprints.clear()
+        loadedSignatures.clear()
         rebuild()
     }
 
     /**
-     * 从聊天页返回 / ON_RESUME 时调用：只有某个会话的 updateAt 变了（或缓存缺失）才重建，
-     * 什么都没变就直接返回，避免每次回到页面都重读数据库和图。
+     * 从聊天页返回 / ON_RESUME 时调用：重读选中的会话，用分支签名（节点数 + 每个节点的 id/selectIndex
+     * + 最后一条消息 id）判断是否被切了分支或编辑过。
+     *
+     * 不能只看 `updateAt`：`selectMessageNode` / `editMessage` 只走 `ConversationSession.update`，
+     * 不改 `updateAt`，否则返回后图还是切换前的。签名没变就什么都不做，避免闪烁。
      */
     fun syncWithCandidates(candidates: List<ComparisonCandidate>) {
-        if (_state.value.loading || buildJob?.isActive == true || order.isEmpty()) return
+        if (candidates.isEmpty() || order.isEmpty()) return
+        if (_state.value.loading || _state.value.cancelled) return
+        if (buildJob?.isActive == true || syncJob?.isActive == true) return
+        val requested = order.toList()
         val byId = candidates.associateBy { it.id }
-        val changed = order.filter { id ->
-            val cached = loaded[id]
-            val summary = byId[id]
-            cached == null || summary == null || summary.updateAt != cached.updateAt
-        }
-        if (changed.isNotEmpty()) {
-            rebuild(reload = changed.toSet())
+        val token = generation
+        // 缓存由主线程写：先快照，后台只读快照，避免和同时进行的 rebuild 抢 HashMap
+        val loadedSnapshot = HashMap(loaded)
+        val signatureSnapshot = HashMap(loadedSignatures)
+        syncJob = viewModelScope.launch {
+            // 读整条会话要碰数据库，放 IO；签名比对是纯字符串
+            val changed = withContext(Dispatchers.IO) {
+                val reload = LinkedHashSet<Uuid>()
+                for (id in requested) {
+                    val cached = loadedSnapshot[id]
+                    if (cached == null) {
+                        reload += id
+                        continue
+                    }
+                    // updateAt 变了就已经足够判定，省掉一次读库
+                    val summary = byId[id]
+                    if (summary != null && summary.updateAt != cached.updateAt) {
+                        reload += id
+                        continue
+                    }
+                    val fresh = try {
+                        conversationRepository.getConversationById(id)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // 读库失败不改判断，等用户主动刷新
+                        continue
+                    }
+                    val conversation = when (val outcome = conversationLoad(fresh)) {
+                        is ConversationLoad.Loaded -> outcome.conversation
+                        else -> continue
+                    }
+                    if (conversation.deletedAt > 0) continue
+                    val previous = signatureSnapshot[id] ?: branchSignature(cached)
+                    if (branchSignature(conversation) != previous) {
+                        reload += id
+                    }
+                }
+                reload
+            }
+            if (token != generation) return@launch
+            if (_state.value.cancelled) return@launch
+            if (changed.isNotEmpty()) {
+                rebuild(reload = changed)
+            }
         }
     }
 
-    /** 用户在加载中点了取消：停掉 job，旧结果一律丢弃。 */
+    /**
+     * 用户在加载中点了取消：停掉 job，旧结果一律丢弃。
+     *
+     * 会话摘要和展开状态也要一起清掉——留着它们会让 [syncWithCandidates] 以为还能继续，
+     * 一回到前台就自动重启构建。取消状态保持到主动刷新或选择变化（rebuild 会复位）。
+     */
     fun cancelLoading() {
         buildJob?.cancel()
+        syncJob?.cancel()
         generation += 1
         _state.update {
             it.copy(
                 loading = false,
                 hashing = false,
                 graph = null,
+                conversations = emptyList(),
+                expanded = emptySet(),
                 failed = false,
                 cancelled = true,
             )
@@ -314,6 +366,7 @@ class ComparisonVM(
                             } else {
                                 if (token != generation) return@launch
                                 loaded[id] = outcome.conversation
+                                loadedSignatures[id] = branchSignature(outcome.conversation)
                                 conversations += outcome.conversation
                             }
                         }
@@ -385,7 +438,7 @@ class ComparisonVM(
             // 建图要算哈希和指纹，放到后台；hash 自己再切 IO，避免主线程卡住
             val graph = try {
                 withContext(Dispatchers.Default) {
-                    buildComparisonGraph(conversations, fileHasher, fingerprints)
+                    buildComparisonGraph(conversations, fileHasher)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -420,7 +473,7 @@ class ComparisonVM(
 
     private fun forget(id: Uuid) {
         loaded.remove(id)
-        fingerprints.forgetConversation(id)
+        loadedSignatures.remove(id)
     }
 
     private fun persistIds() {

@@ -69,40 +69,30 @@ class ComparisonGraphTest {
     }
 
     @Test
-    fun `fingerprint cache is reused and invalidated by a new message id`() = runTest {
-        val hasher = object : FileHasher {
-            var calls = 0
-            override suspend fun hash(url: String): String? {
-                calls += 1
-                return "bytes"
-            }
-        }
-        val cache = HashMap<Pair<Uuid, Uuid>, String>()
+    fun `message fingerprint follows content even when the id is unchanged`() = runTest {
+        // context checkpoint 走 original.copy(parts = ...)：id 不变、内容变了。
+        // 以 (会话, 消息 id) 为键的消息级缓存会在这里命中旧指纹，合并出错误的图。
         val message = UIMessage(
             role = MessageRole.USER,
-            parts = listOf(UIMessagePart.Image("file:///a.png")),
+            parts = listOf(UIMessagePart.Text("old summary")),
+            isContextCheckpoint = true,
         )
         val conversation = Conversation(
             assistantId = Uuid.random(),
             messageNodes = listOf(message.toMessageNode()),
         )
+        val before = buildComparisonGraph(listOf(conversation), noFiles)
 
-        buildComparisonGraph(listOf(conversation), hasher, cache)
-        assertEquals(1, hasher.calls)
-
-        // 同一个 (会话, 消息) 再建一次图：直接命中缓存
-        buildComparisonGraph(listOf(conversation), hasher, cache)
-        assertEquals(1, hasher.calls)
-
-        // 重新生成后消息 id 变了，缓存必须失效
-        val regenerated = conversation.copy(
-            messageNodes = listOf(message.copy(id = Uuid.random()).toMessageNode()),
+        val rewritten = conversation.copy(
+            messageNodes = listOf(
+                message.copy(parts = listOf(UIMessagePart.Text("new summary"))).toMessageNode(),
+            ),
         )
-        buildComparisonGraph(listOf(regenerated), hasher, cache)
-        assertEquals(2, hasher.calls)
+        val after = buildComparisonGraph(listOf(rewritten), noFiles)
 
-        cache.forgetConversation(conversation.id)
-        assertTrue(cache.keys.none { it.first == conversation.id })
+        assertEquals("old summary", before.nodes.getValue(before.rootIds.single()).message.toText())
+        assertEquals("new summary", after.nodes.getValue(after.rootIds.single()).message.toText())
+        assertNotEquals(before.rootIds.single(), after.rootIds.single())
     }
 
     @Test
