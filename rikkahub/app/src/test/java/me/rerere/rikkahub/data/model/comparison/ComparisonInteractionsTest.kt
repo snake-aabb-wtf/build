@@ -107,12 +107,14 @@ class ComparisonInteractionsTest {
         // 已选 7 个时剩 1 个名额，但选择器仍列出全部 3 条，是否加得进由 canAddConversation 判定
         val seven = candidates.take(7).map { it.id }.toSet()
         assertEquals(3, availableCandidates(candidates, seven).size)
-        assertFalse(canAddConversation(seven, candidates[7].id))
-        assertFalse(canAddConversation(seven, candidates[8].id))
+        assertTrue(canAddConversation(seven, candidates[7].id))
 
+        // 已选满 8 个：选择器为空，再点任何候选都不能加入
+        val eight = candidates.take(8).map { it.id }.toSet()
+        assertFalse(canAddConversation(eight, candidates[8].id))
         assertEquals(
             emptyList<ComparisonCandidate>(),
-            availableCandidates(candidates, candidates.take(8).map { it.id }.toSet()),
+            availableCandidates(candidates, eight),
         )
     }
 
