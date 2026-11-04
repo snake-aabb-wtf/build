@@ -80,7 +80,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // CI 用 apksigner 手动签名（v1+v2+v3）：AGP 在 minSdk 26 下不会产出 JAR 签名，
+            // 而华为/鸿蒙安装器要核 META-INF 里的证书。这里留 unsigned，签名在 workflow 里做。
+            signingConfig = null
             optimization {
                 enable = true
             }
