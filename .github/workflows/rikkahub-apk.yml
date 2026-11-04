@@ -129,7 +129,8 @@ jobs:
           APK=app/build/outputs/apk/github/release/app-github-arm64-v8a-release.apk
           echo "APK: $APK"
           APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/apksigner.txt
+          "$APKSIGNER" verify --verbose --print-certs --min-sdk-version 23 "$APK" | tee /tmp/apksigner.txt
+          # apksigner 在 minSdk>=24 时会跳过 v1 校验并报 false，所以固定用 23 来检查 JAR 签名是否真的写进去了
           grep -q "Verified using v1 scheme (JAR signing): true" /tmp/apksigner.txt \
             || { echo "::error::APK has no v1 (JAR) signature; Huawei installers reject it"; exit 1; }
           grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" /tmp/apksigner.txt \
