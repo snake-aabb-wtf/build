@@ -50,6 +50,11 @@ android {
 
     signingConfigs {
         create("release") {
+            // 华为/HarmonyOS 安装器要求 APK 带 JAR（v1）签名，只有 v2 的包会报「安装包缺少证书」。
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+
             val localProperties = Properties()
             val localPropertiesFile = rootProject.file("local.properties")
 
