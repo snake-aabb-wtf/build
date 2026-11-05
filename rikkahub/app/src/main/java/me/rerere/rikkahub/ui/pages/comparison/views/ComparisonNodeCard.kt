@@ -18,10 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,9 +32,9 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.comparison.ComparisonNode
 
 /**
- * 三种视图共用的节点卡：角色、来源、正文、分叉描边、会话终点标记。
+ * 对比画布的节点卡：角色、来源、正文、分叉描边、会话终点标记。
  *
- * 卡片不再写死高度（大字号下会切正文），由 [minHeight] 撑住画布/时间线的排布间距；
+ * 卡片不再写死高度（大字号下会切正文），由 [minHeight] 撑住画布的排布间距；
  * 头部标签数量有上限，超出的会话收成 `+N`，220dp 宽也不会溢出。
  */
 @Composable
@@ -46,10 +43,7 @@ fun ComparisonNodeCard(
     endpoint: Boolean,
     maxLines: Int,
     modifier: Modifier = Modifier,
-    accent: Color? = null,
     minHeight: Dp = 0.dp,
-    expandable: Boolean = false,
-    depth: Int? = null,
     endpointTitles: List<String> = emptyList(),
     onEndpointClick: (() -> Unit)? = null,
     onClick: () -> Unit = {},
@@ -61,7 +55,6 @@ fun ComparisonNodeCard(
             maxLines = maxLines,
             modifier = modifier,
             minHeight = minHeight,
-            expandable = expandable,
             endpointTitles = endpointTitles,
             onEndpointClick = onEndpointClick,
             onClick = onClick,
@@ -91,8 +84,6 @@ fun ComparisonNodeCard(
                 node = node,
                 endpoint = endpoint,
                 isFork = isFork,
-                accent = accent,
-                depth = depth,
                 endpointTitles = endpointTitles,
                 onEndpointClick = onEndpointClick,
                 content = content,
@@ -100,7 +91,6 @@ fun ComparisonNodeCard(
             NodeBody(
                 node = node,
                 maxLines = maxLines,
-                expandable = expandable,
                 content = content,
             )
         }
@@ -112,8 +102,6 @@ private fun CardHeader(
     node: ComparisonNode,
     endpoint: Boolean,
     isFork: Boolean,
-    accent: Color?,
-    depth: Int?,
     endpointTitles: List<String>,
     onEndpointClick: (() -> Unit)?,
     content: Color,
@@ -123,13 +111,6 @@ private fun CardHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (accent != null) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(accent, CircleShape)
-            )
-        }
         Text(
             text = comparisonRoleLabel(node.message.role),
             style = MaterialTheme.typography.labelSmall,
@@ -145,14 +126,6 @@ private fun CardHeader(
                 color = content.copy(alpha = 0.7f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (depth != null && depth > 0) {
-            Text(
-                text = stringResource(R.string.comparison_depth, depth),
-                style = MaterialTheme.typography.labelSmall,
-                color = content.copy(alpha = 0.7f),
-                maxLines = 1,
             )
         }
         Spacer(Modifier.weight(1f))
@@ -213,33 +186,17 @@ private fun SourceTitles(
 private fun NodeBody(
     node: ComparisonNode,
     maxLines: Int,
-    expandable: Boolean,
     content: Color,
 ) {
-    var expanded by remember(node.id) { mutableStateOf(false) }
-    var overflowed by remember(node.id) { mutableStateOf(false) }
     val body = comparisonNodeText(node)
 
     Text(
         text = body,
         style = MaterialTheme.typography.bodyMedium,
         color = content,
-        maxLines = if (expanded) Int.MAX_VALUE else maxLines,
+        maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
-        onTextLayout = { layout ->
-            if (!expanded) overflowed = layout.hasVisualOverflow
-        },
     )
-    if (expandable && (overflowed || expanded)) {
-        Text(
-            text = stringResource(
-                if (expanded) R.string.comparison_collapse_text else R.string.comparison_expand_text
-            ),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.clickable { expanded = !expanded },
-        )
-    }
 }
 
 /** 压缩检查点单独成形，不按普通气泡画。 */
@@ -250,7 +207,6 @@ private fun ComparisonCheckpointCard(
     maxLines: Int,
     modifier: Modifier = Modifier,
     minHeight: Dp = 0.dp,
-    expandable: Boolean = false,
     endpointTitles: List<String> = emptyList(),
     onEndpointClick: (() -> Unit)? = null,
     onClick: () -> Unit = {},
@@ -306,7 +262,6 @@ private fun ComparisonCheckpointCard(
             NodeBody(
                 node = node,
                 maxLines = maxLines,
-                expandable = expandable,
                 content = content,
             )
         }

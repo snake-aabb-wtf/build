@@ -89,36 +89,13 @@ class ComparisonLayoutTest {
     }
 
     @Test
-    fun `timeline lanes equal leaf count`() = runTest {
-        val graph = buildComparisonGraph(
-            listOf(
-                conversation("A", "hi", "a"),
-                conversation("B", "hi", "b"),
-                conversation("C", "hi", "c"),
-            ),
-            noFiles,
-        )
-
-        val layout = timelineLayout(graph, columnWidth = 200f, laneHeight = 80f)
-
-        assertEquals(3, layout.leafCount)
-        val leaves = graph.nodes.values.filter { it.childIds.isEmpty() }.map { layout.points.getValue(it.id) }
-        assertEquals(setOf(0f, 80f, 160f), leaves.map { it.y }.toSet())
-        val root = layout.points.getValue(graph.rootIds.single())
-        assertEquals(80f, root.y, 0.001f)
-    }
-
-    @Test
     fun `empty graph lays out nothing`() = runTest {
         val graph = buildComparisonGraph(emptyList(), noFiles)
 
         val tidy = tidyLayout(graph, columnWidth = 100f, rowHeight = 50f)
-        val timeline = timelineLayout(graph, columnWidth = 100f, laneHeight = 50f)
 
         assertTrue(tidy.points.isEmpty())
         assertEquals(0, tidy.leafCount)
-        assertTrue(timeline.points.isEmpty())
-        assertEquals(0, timeline.leafCount)
     }
 
     @Test
@@ -147,26 +124,6 @@ class ComparisonLayoutTest {
         assertEquals(3, sizes.getValue(root.id))
         assertEquals(2, sizes.getValue(mid.id))
         assertEquals(1, sizes.getValue(leaf.id))
-    }
-
-    @Test
-    fun `timeline columns follow depth and lanes follow leaves`() = runTest {
-        val graph = buildComparisonGraph(
-            listOf(
-                conversation("A", "hi", "a"),
-                conversation("B", "hi", "b"),
-            ),
-            noFiles,
-        )
-
-        val layout = timelineLayout(graph, columnWidth = 200f, laneHeight = 80f)
-
-        assertEquals(2, layout.leafCount)
-        val root = graph.nodes.getValue(graph.rootIds.single())
-        assertEquals(0f, layout.points.getValue(root.id).x, 0.001f)
-        val leaves = graph.nodes.values.filter { it.childIds.isEmpty() }.map { layout.points.getValue(it.id) }
-        assertEquals(setOf(200f), leaves.map { it.x }.toSet())
-        assertEquals(setOf(0f, 80f), leaves.map { it.y }.toSet())
     }
 
     private fun conversation(title: String, vararg texts: String) = Conversation(

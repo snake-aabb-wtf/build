@@ -1804,9 +1804,6 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <!-- Branch comparison page -->
   <string name="comparison_page_title">分支对比</string>
   <string name="comparison_summary">%1$d 个节点 · %2$d 个会话</string>
-  <string name="comparison_view_indented">缩进树</string>
-  <string name="comparison_view_canvas">画布</string>
-  <string name="comparison_view_timeline">时间线</string>
   <string name="comparison_refresh">重新构建对比</string>
   <string name="comparison_loading">正在构建对比…</string>
   <string name="comparison_hashing">正在读取本地附件…</string>
@@ -1826,9 +1823,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="comparison_fork">分叉</string>
   <string name="comparison_shared_by">%1$d 个会话共有</string>
   <string name="comparison_fold_more">+%1$d 条后续</string>
-  <string name="comparison_expand_text">展开全文</string>
   <string name="comparison_collapse_text">收起</string>
-  <string name="comparison_depth">深度 %1$d</string>
   <string name="comparison_reset_view">复位视图</string>
   <string name="comparison_hidden_nodes">还有 %1$d 个节点未显示，放大查看</string>
   <string name="comparison_checkpoint_title">上下文压缩点</string>
@@ -1850,7 +1845,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="comparison_compare_action">对比分支</string>
   <string name="comparison_select_hint">至少选择 2 个会话</string>
   <string name="comparison_choose_source">选择来源会话</string>
-  <string name="comparison_large_graph">图较大，可切到缩进树查看全部</string>
+  <string name="comparison_large_graph">图较大，可缩放、拖动画布或展开折叠节点查看</string>
   <string name="comparison_need_two">至少选择 2 个会话才能对比</string>
   <string name="comparison_picker_title">添加会话</string>
   <string name="comparison_picker_empty">没有可选的会话</string>

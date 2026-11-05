@@ -50,7 +50,7 @@ internal const val MinCanvasScale = 0.2f
 internal const val MaxCanvasScale = 3f
 
 /**
- * 视图 B：自由画布。tidy-tree 布局 + 双指缩放/拖动，贝塞尔连线。
+ * 自由画布：tidy-tree 布局 + 双指缩放/拖动，贝塞尔连线。
  *
  * 视口是容器尺寸，节点按世界坐标换算成屏幕偏移后再用 graphicsLayer 缩放；整图尺寸从不进
  * `Modifier.size()`，所以 2000 节点的长会话不会撞上 Compose 的 18 bit Constraints 上限。
@@ -71,7 +71,7 @@ fun CanvasTreeView(
     modifier: Modifier = Modifier,
     endpointTitles: Map<String, List<String>> = emptyMap(),
     onEndpointClick: (ComparisonNode) -> Unit = {},
-    /** 是否已完成首次 fit：放在 VM 里，切视图回来不再重置用户的缩放/平移。 */
+    /** 是否已完成首次 fit：放在 VM 里，返回页面时不再重置用户的缩放/平移。 */
     fitted: Boolean = false,
     onFitted: () -> Unit = {},
     onExpandSegment: (String) -> Unit = {},

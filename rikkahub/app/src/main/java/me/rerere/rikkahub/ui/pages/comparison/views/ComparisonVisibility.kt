@@ -3,14 +3,12 @@ package me.rerere.rikkahub.ui.pages.comparison.views
 import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.ComparisonNode
 import me.rerere.rikkahub.data.model.comparison.LayoutPoint
-import me.rerere.rikkahub.data.model.comparison.conversationEndpointTitles
 import me.rerere.rikkahub.ui.pages.comparison.ComparisonViewport
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.roundToInt
 
 /**
- * 折叠阈值：子树大于这个节点数、且本身是分叉点的节点，在画布/时间线里先收成 `+N` 占位。
+ * 折叠阈值：子树大于这个节点数、且本身是分叉点的节点，在画布里先收成 `+N` 占位。
  *
  * 线性链不做整棵子树折叠：1000 条消息的单链没有可省的视觉分支。超长单链只在
  * [linearCompression] 里压缩中段，首尾仍可读。
@@ -290,64 +288,3 @@ internal fun fitViewport(
     }
     return ComparisonViewport(scale = scale, panX = panX, panY = panY)
 }
-
-/** 单轴 fit（时间线不平滑缩放）：内容小于视口时居中，否则从起点开始。 */
-internal fun fitPan(contentPx: Float, viewportPx: Float, startPx: Float = 0f): Float =
-    if (contentPx <= viewportPx) (viewportPx - contentPx) / 2f - startPx else -startPx
-
-/**
- * 平移轴的限位：内容大于视口时允许半屏的过滚，内容小于视口时居中。
- *
- * pan 是内容平移量：内容占 `[pan, pan + contentPx]`。
- */
-internal fun clampPanAxis(value: Float, contentPx: Float, viewportPx: Float): Float =
-    clampPan(value = value, startPx = 0f, endPx = contentPx, viewportPx = viewportPx)
-
-/**
- * 每条泳道里的全部会话标题（去重，保持出现顺序）。
- *
- * 以「会话终点所在的节点」归属泳道：一条会话可能提前停在分叉前，按叶子归属会把它算错。
- */
-internal fun laneConversationTitles(
-    graph: ComparisonGraph,
-    points: Map<String, LayoutPoint>,
-    laneHeight: Float,
-    laneCount: Int,
-): List<List<String>> {
-    if (laneCount <= 0 || laneHeight <= 0f) return emptyList()
-    val lanes = MutableList(laneCount) { LinkedHashSet<String>() }
-
-    fun laneOf(point: LayoutPoint): Int =
-        (point.y / laneHeight).roundToInt().coerceIn(0, laneCount - 1)
-
-    conversationEndpointTitles(graph).forEach { (nodeId, names) ->
-        val point = points[nodeId] ?: return@forEach
-        lanes[laneOf(point)].addAll(names)
-    }
-    // 理论上每条 lane 都有终点；空 lane 用该位置的叶子兜底，标题列不留空
-    graph.nodes.values.forEach { node ->
-        if (node.childIds.isNotEmpty()) return@forEach
-        val point = points[node.id] ?: return@forEach
-        val lane = laneOf(point)
-        if (lanes[lane].isEmpty()) {
-            node.occurrences.forEach { occurrence -> lanes[lane] += occurrence.conversationTitle }
-        }
-    }
-    return lanes.map { it.toList() }
-}
-
-/** 泳道标题：1 个直接显示，2 个用 ` · ` 连接，更多只留前 2 个加 `+N`。 */
-internal fun laneTitleText(titles: List<String>): String = when {
-    titles.isEmpty() -> ""
-    titles.size <= 2 -> titles.joinToString(" · ")
-    else -> titles.take(2).joinToString(" · ") + " +" + (titles.size - 2)
-}
-
-/** 时间线泳道的短标题：该 lane 的所有会话，超过 2 个收成 `A · B +N`。 */
-internal fun laneTitles(
-    graph: ComparisonGraph,
-    points: Map<String, LayoutPoint>,
-    laneHeight: Float,
-    laneCount: Int,
-): List<String> =
-    laneConversationTitles(graph, points, laneHeight, laneCount).map(::laneTitleText)

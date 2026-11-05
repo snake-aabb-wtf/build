@@ -22,9 +22,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -69,13 +66,10 @@ import me.rerere.rikkahub.data.model.comparison.isLargeSelection
 import me.rerere.rikkahub.data.model.comparison.sourceOccurrences
 import me.rerere.rikkahub.data.model.comparison.subtreeSizes
 import me.rerere.rikkahub.data.model.comparison.tidyLayout
-import me.rerere.rikkahub.data.model.comparison.timelineLayout
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.pages.comparison.views.CanvasTreeView
 import me.rerere.rikkahub.ui.pages.comparison.views.ComparisonMetrics
-import me.rerere.rikkahub.ui.pages.comparison.views.IndentedTreeView
-import me.rerere.rikkahub.ui.pages.comparison.views.TimelineView
 import me.rerere.rikkahub.ui.pages.comparison.views.comparisonNodeText
 import me.rerere.rikkahub.ui.pages.comparison.views.comparisonRoleLabel
 import me.rerere.rikkahub.utils.pushToChatPage
@@ -83,7 +77,7 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 import kotlin.uuid.Uuid
 
-// 布局用的列宽/行高由 ComparisonMetrics 统一提供，三个视图共用一份数字
+// 布局和画布卡片的列宽/行高由 ComparisonMetrics 统一提供
 
 @Composable
 fun ComparisonPage(
@@ -216,9 +210,7 @@ fun ComparisonPage(
             }
             ComparisonToolbar(
                 conversations = state.conversations,
-                viewMode = state.viewMode,
                 enabled = !state.loading,
-                onViewModeChange = vm::setViewMode,
                 onRemove = vm::removeConversation,
                 onAdd = onAddConversations ?: { showPicker = true },
             )
@@ -233,7 +225,7 @@ fun ComparisonPage(
                 )
             }
             if (graph != null && isLargeComparison(graph)) {
-                // 只提示不拦：A 视图永不折叠，几千条消息也能逐条读
+                // 只提示不拦：通过画布的缩放、平移和展开查看大图
                 Text(
                     text = stringResource(R.string.comparison_large_graph),
                     style = MaterialTheme.typography.labelMedium,
@@ -252,10 +244,7 @@ fun ComparisonPage(
                     endpointSheetTitles = endpointTitlesOf(state.graph, node)
                 },
                 onCanvasViewportChange = vm::setCanvasViewport,
-                onTimelineViewportChange = vm::setTimelineViewport,
                 onCanvasFitted = vm::markCanvasFitted,
-                onTimelineFitted = vm::markTimelineFitted,
-                onIndentPositionChange = vm::setIndentPosition,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
@@ -382,9 +371,7 @@ private fun OccurrencePickerSheet(
 @Composable
 private fun ComparisonToolbar(
     conversations: List<ComparisonConversationSummary>,
-    viewMode: ComparisonViewMode,
     enabled: Boolean,
-    onViewModeChange: (ComparisonViewMode) -> Unit,
     onRemove: (Uuid) -> Unit,
     onAdd: (() -> Unit)?,
 ) {
@@ -461,19 +448,6 @@ private fun ComparisonToolbar(
                 )
             }
         }
-
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            val modes = ComparisonViewMode.entries
-            modes.forEachIndexed { index, mode ->
-                SegmentedButton(
-                    selected = viewMode == mode,
-                    onClick = { onViewModeChange(mode) },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = modes.size),
-                ) {
-                    Text(mode.label())
-                }
-            }
-        }
     }
 }
 
@@ -491,10 +465,7 @@ private fun ComparisonContent(
     onNodeClick: (ComparisonNode) -> Unit,
     onEndpointClick: (ComparisonNode) -> Unit,
     onCanvasViewportChange: (ComparisonViewport) -> Unit,
-    onTimelineViewportChange: (ComparisonViewport) -> Unit,
     onCanvasFitted: () -> Unit,
-    onTimelineFitted: () -> Unit,
-    onIndentPositionChange: (Int, Int, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val graph = state.graph
@@ -536,78 +507,28 @@ private fun ComparisonContent(
                 val sizes = remember(graph) { subtreeSizes(graph) }
                 val endpointTitles = remember(graph) { conversationEndpointTitles(graph) }
                 val endpoints = endpointTitles.keys
-                when (state.viewMode) {
-                    ComparisonViewMode.INDENTED -> IndentedTreeView(
+                // 画布按像素 offset 定位，RTL 会把偏移镜像到屏幕外；内部固定 LTR
+                CompositionLocalProvider(
+                    LocalLayoutDirection provides LayoutDirection.Ltr
+                ) {
+                    CanvasTreeView(
                         graph = graph,
+                        layout = tidy,
+                        sizes = sizes,
                         endpointIds = endpoints,
-                        metrics = metrics,
-                        onNodeClick = onNodeClick,
-                        modifier = modifier,
                         expanded = state.expanded,
+                        viewport = state.canvasViewport,
+                        onViewportChange = onCanvasViewportChange,
                         onExpand = onExpand,
+                        onNodeClick = onNodeClick,
+                        metrics = metrics,
+                        modifier = modifier,
                         endpointTitles = endpointTitles,
                         onEndpointClick = onEndpointClick,
-                        firstVisibleIndex = state.indentFirstIndex,
-                        firstVisibleOffset = state.indentOffset,
-                        horizontalScroll = state.indentScrollX,
-                        onPositionChange = onIndentPositionChange,
+                        fitted = state.canvasFitted,
+                        onFitted = onCanvasFitted,
+                        onExpandSegment = onExpandSegment,
                     )
-
-                    // 画布/时间线按像素 offset 定位，RTL 会把偏移镜像到屏幕外；内部固定 LTR
-                    ComparisonViewMode.CANVAS -> CompositionLocalProvider(
-                        LocalLayoutDirection provides LayoutDirection.Ltr
-                    ) {
-                        CanvasTreeView(
-                            graph = graph,
-                            layout = tidy,
-                            sizes = sizes,
-                            endpointIds = endpoints,
-                            expanded = state.expanded,
-                            viewport = state.canvasViewport,
-                            onViewportChange = onCanvasViewportChange,
-                            onExpand = onExpand,
-                            onNodeClick = onNodeClick,
-                            metrics = metrics,
-                            modifier = modifier,
-                            endpointTitles = endpointTitles,
-                            onEndpointClick = onEndpointClick,
-                            fitted = state.canvasFitted,
-                            onFitted = onCanvasFitted,
-                            onExpandSegment = onExpandSegment,
-                        )
-                    }
-
-                    ComparisonViewMode.TIMELINE -> {
-                        val timeline = remember(graph, metrics) {
-                            timelineLayout(
-                                graph,
-                                metrics.timelineColumnWidth.value,
-                                metrics.timelineLaneHeight.value,
-                            )
-                        }
-                        CompositionLocalProvider(
-                            LocalLayoutDirection provides LayoutDirection.Ltr
-                        ) {
-                            TimelineView(
-                                graph = graph,
-                                layout = timeline,
-                                sizes = sizes,
-                                endpointIds = endpoints,
-                                expanded = state.expanded,
-                                viewport = state.timelineViewport,
-                                onViewportChange = onTimelineViewportChange,
-                                onExpand = onExpand,
-                                onNodeClick = onNodeClick,
-                                metrics = metrics,
-                                modifier = modifier,
-                                endpointTitles = endpointTitles,
-                                onEndpointClick = onEndpointClick,
-                                fitted = state.timelineFitted,
-                                onFitted = onTimelineFitted,
-                                onExpandSegment = onExpandSegment,
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -669,11 +590,4 @@ private fun ComparisonPlaceholder(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-}
-
-@Composable
-private fun ComparisonViewMode.label(): String = when (this) {
-    ComparisonViewMode.INDENTED -> stringResource(R.string.comparison_view_indented)
-    ComparisonViewMode.CANVAS -> stringResource(R.string.comparison_view_canvas)
-    ComparisonViewMode.TIMELINE -> stringResource(R.string.comparison_view_timeline)
 }
