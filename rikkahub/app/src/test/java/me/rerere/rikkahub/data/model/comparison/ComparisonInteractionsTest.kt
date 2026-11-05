@@ -89,7 +89,8 @@ class ComparisonInteractionsTest {
     @Test
     fun `restore keeps every saved id`() {
         val many = (1..12).map { Uuid.random().toString() }
-        assertEquals(12, restoreComparisonIds(saved = many, fallback = emptyList()).size)
+        val expected = many.map { Uuid.parse(it) }
+        assertEquals(expected, restoreComparisonIds(saved = many, fallback = emptyList()))
     }
 
     @Test
@@ -140,11 +141,9 @@ class ComparisonInteractionsTest {
         // 无上限后，只要不在选择里就能继续加
         val seven = candidates.take(7).map { it.id }.toSet()
         assertEquals(3, availableCandidates(candidates, seven).size)
-        assertTrue(candidates[7].id !in seven)
 
         // 已选 8 个甚至更多：无上限，仍可加入
         val eight = candidates.take(8).map { it.id }.toSet()
-        assertTrue(candidates[8].id !in eight)
         val atCap = availableCandidates(candidates, eight)
         assertEquals(2, atCap.size)
         assertTrue(atCap.none { it.id in eight })

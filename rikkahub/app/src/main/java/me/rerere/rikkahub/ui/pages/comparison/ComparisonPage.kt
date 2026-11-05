@@ -218,7 +218,6 @@ fun ComparisonPage(
                 conversations = state.conversations,
                 viewMode = state.viewMode,
                 enabled = !state.loading,
-                canAdd = !state.loading,
                 onViewModeChange = vm::setViewMode,
                 onRemove = vm::removeConversation,
                 onAdd = onAddConversations ?: { showPicker = true },
@@ -385,7 +384,6 @@ private fun ComparisonToolbar(
     conversations: List<ComparisonConversationSummary>,
     viewMode: ComparisonViewMode,
     enabled: Boolean,
-    canAdd: Boolean,
     onViewModeChange: (ComparisonViewMode) -> Unit,
     onRemove: (Uuid) -> Unit,
     onAdd: (() -> Unit)?,
@@ -448,9 +446,10 @@ private fun ComparisonToolbar(
                     },
                 )
             }
-            if (onAdd != null && canAdd) {
+            if (onAdd != null) {
                 AssistChip(
                     onClick = onAdd,
+                    enabled = enabled,
                     label = { Text(stringResource(R.string.comparison_add)) },
                     leadingIcon = {
                         Icon(
