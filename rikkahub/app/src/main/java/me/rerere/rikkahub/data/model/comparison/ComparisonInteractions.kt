@@ -10,6 +10,9 @@ const val COMPARISON_MIN_CONVERSATIONS = 2
 /** 一次对比最多容纳的会话数，再多屏幕和选择器都排不下。 */
 const val COMPARISON_MAX_CONVERSATIONS = 8
 
+/** 超过这个会话数时在对比页提示建图可能较慢，只提示不阻断。 */
+const val COMPARISON_LARGE_SELECTION_THRESHOLD = 32
+
 /** 超过这个节点数时提示用户缩进树视图仍会显示全部内容。 */
 const val LARGE_COMPARISON_NODE_THRESHOLD = 2000
 
@@ -20,16 +23,9 @@ data class ComparisonCandidate(
     val updateAt: Instant,
 )
 
-/** 多选开关：已选则取消，未选则加入；到上限后不再加入。 */
-fun toggleComparisonSelection(
-    selected: Set<Uuid>,
-    id: Uuid,
-    limit: Int = COMPARISON_MAX_CONVERSATIONS,
-): Set<Uuid> = when {
-    id in selected -> selected - id
-    selected.size >= limit -> selected
-    else -> selected + id
-}
+/** 多选开关：已选则取消，未选则加入。 */
+fun toggleComparisonSelection(selected: Set<Uuid>, id: Uuid): Set<Uuid> =
+    if (id in selected) selected - id else selected + id
 
 /**
  * 从保存状态恢复选择：区分「没存过」和「存的是空列表」。
@@ -37,33 +33,32 @@ fun toggleComparisonSelection(
  * `saved == null` 才退回路由参数；空列表是用户删到 0 个的有效状态，必须保持空，
  * 否则删干净后重建页面会把路由里的原始会话又「复活」。
  */
-fun restoreComparisonIds(
-    saved: List<String>?,
-    fallback: List<String>,
-    limit: Int = COMPARISON_MAX_CONVERSATIONS,
-): List<Uuid> {
-    val source = saved ?: fallback
-    return source
+fun restoreComparisonIds(saved: List<String>?, fallback: List<String>): List<Uuid> =
+    (saved ?: fallback)
         .mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }
         .distinct()
-        .take(limit)
-}
 
 /** 选中数量够不够开始对比。 */
 fun canCompare(selected: Set<Uuid>): Boolean = selected.size >= COMPARISON_MIN_CONVERSATIONS
 
-/** 还能不能再加一个会话（已在选择里、或已到上限时都不行）。 */
-fun canAddConversation(
-    selected: Set<Uuid>,
-    id: Uuid,
-    limit: Int = COMPARISON_MAX_CONVERSATIONS,
-): Boolean = id !in selected && selected.size < limit
+/** 还能不能再加一个会话（已在选择里则不行）。 */
+fun canAddConversation(selected: Set<Uuid>, id: Uuid): Boolean = id !in selected
+
+/** 全选：取每个候选的 id（去重后）作为新的选择。 */
+fun selectAllCandidates(candidates: List<ComparisonCandidate>): Set<Uuid> =
+    candidates.mapTo(HashSet()) { it.id }
+
+/** 是否已选中全部候选（空列表不算全选）。 */
+fun isAllSelected(selected: Set<Uuid>, candidates: List<ComparisonCandidate>): Boolean =
+    candidates.isNotEmpty() && candidates.all { it.id in selected }
+
+/** 选择数量是否超过大选择阈值，超了只提示不阻断。 */
+fun isLargeSelection(count: Int): Boolean = count > COMPARISON_LARGE_SELECTION_THRESHOLD
 
 /**
  * 选择器实际列出的会话：只列还没进对比的全部候选。
  *
- * 已在对比里的会话在上方 chip 里显示，不在弹层里重复出现。上限只在「加入时」由
- * [canAddConversation] 判定：若在这里按剩余名额截断，已选 7 个时就只剩 1 条候选可选。
+ * 已在对比里的会话在上方 chip 里显示，不在弹层里重复出现。
  */
 fun availableCandidates(
     candidates: List<ComparisonCandidate>,
