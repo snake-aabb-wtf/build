@@ -46,7 +46,8 @@
   - `fun selectAllCandidates(candidates: List<ComparisonCandidate>): Set<Uuid>`
   - `fun isAllSelected(selected: Set<Uuid>, candidates: List<ComparisonCandidate>): Boolean`
   - `fun isLargeSelection(count: Int): Boolean`
-  - 删除 `COMPARISON_MAX_CONVERSATIONS` 与 `canAddConversation`
+  - `fun canAddConversation(selected: Set<Uuid>, id: Uuid): Boolean`（去掉 `limit` 参数）
+  - 本任务**保留** `COMPARISON_MAX_CONVERSATIONS` 与其余使用点，删除动作留到 Task 3（否则 App 模块编译失败，单测跑不起来）
 
 - [ ] **Step 1: 写失败测试**
 
@@ -98,11 +99,13 @@ fun `large selection starts above the threshold`() {
 }
 ```
 
-同时把 `restoreComparisonIds` 的旧断言「超出上限只取前 8 个」删掉。
+同时：
+- 删掉 `restoreComparisonIds` 的旧断言「超出上限只取前 8 个」。
+- `picker lists every unselected conversation` 用例里，把「已选满 8 个时 `assertFalse(canAddConversation(eight, candidates[8].id))`」改成 `assertTrue(...)`，注释改为「无上限后仍可加入」。
 
 - [ ] **Step 2: 推送分支，跑测试确认失败**
 
-推送 `feat/comparison-select-all` 后触发 `RikkaHub Unit Tests`。Expected: 编译失败，提示 `selectAllCandidates`/`isAllSelected`/`isLargeSelection` 未定义。
+推送 `feat/comparison-select-all` 后，由编排者用 `workflow_dispatch` 运行 `RikkaHub APK`。Expected: `Run unit tests` 编译失败，提示 `selectAllCandidates`/`isAllSelected`/`isLargeSelection` 未定义。
 
 - [ ] **Step 3: 实现**
 
@@ -129,11 +132,19 @@ fun isAllSelected(selected: Set<Uuid>, candidates: List<ComparisonCandidate>): B
 fun isLargeSelection(count: Int): Boolean = count > COMPARISON_LARGE_SELECTION_THRESHOLD
 ```
 
-删除 `COMPARISON_MAX_CONVERSATIONS` 与 `canAddConversation`；更新 `restoreComparisonIds` 的 KDoc（不再提上限）。
+补充：`canAddConversation` 改为两参数版本，语义只判断「还没被选」：
+
+```kotlin
+fun canAddConversation(selected: Set<Uuid>, id: Uuid): Boolean = id !in selected
+```
+
+**不要**在这里删除 `COMPARISON_MAX_CONVERSATIONS`：`HistoryPage`、`ComparisonPage`、`ComparisonPickerSheet`、`ChatUtil` 仍在引用，删了整包编译失败；常量与 `canAddConversation` 的删除放在 Task 3。
+
+更新 `restoreComparisonIds` 的 KDoc（不再提上限）。
 
 - [ ] **Step 4: 跑测试确认通过**
 
-触发 `RikkaHub Unit Tests`。Expected: 全部 success，`ComparisonInteractionsTest` 无失败。
+由编排者用 `workflow_dispatch` 在功能分支运行 `RikkaHub APK`。Expected: `Run unit tests` success，`ComparisonInteractionsTest` 无失败。
 
 - [ ] **Step 5: 提交**
 
@@ -259,6 +270,8 @@ fun addConversation(id: Uuid) {
 ```
 
 删除 `ComparisonEvent.SelectionLimitReached` 及 `canAddConversation` 的 import；`addConversation` 里不再发事件。
+
+同时从 `ComparisonInteractions.kt` 删除 `canAddConversation` 与 `COMPARISON_MAX_CONVERSATIONS`（此时已无使用点），并清理 `ComparisonPickerSheet` KDoc 里提到 `canAddConversation` 的句子。
 
 - [ ] **Step 2: 对比页去上限、加提示**
 
