@@ -58,7 +58,6 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.model.comparison.COMPARISON_MAX_CONVERSATIONS
 import me.rerere.rikkahub.data.model.comparison.COMPARISON_MIN_CONVERSATIONS
 import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.ComparisonNode
@@ -66,6 +65,7 @@ import me.rerere.rikkahub.data.model.comparison.NodeOccurrence
 import me.rerere.rikkahub.data.model.comparison.availableCandidates
 import me.rerere.rikkahub.data.model.comparison.conversationEndpointTitles
 import me.rerere.rikkahub.data.model.comparison.isLargeComparison
+import me.rerere.rikkahub.data.model.comparison.isLargeSelection
 import me.rerere.rikkahub.data.model.comparison.sourceOccurrences
 import me.rerere.rikkahub.data.model.comparison.subtreeSizes
 import me.rerere.rikkahub.data.model.comparison.tidyLayout
@@ -109,10 +109,6 @@ fun ComparisonPage(
             when (event) {
                 is ComparisonEvent.ConversationsMissing -> snackbarHostState.showSnackbar(
                     context.getString(R.string.comparison_missing, event.count)
-                )
-
-                ComparisonEvent.SelectionLimitReached -> snackbarHostState.showSnackbar(
-                    context.getString(R.string.comparison_limit, COMPARISON_MAX_CONVERSATIONS)
                 )
 
                 ComparisonEvent.MessageMissing -> snackbarHostState.showSnackbar(
@@ -210,11 +206,19 @@ fun ComparisonPage(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
+            if (isLargeSelection(state.selectedIds.size)) {
+                Text(
+                    text = stringResource(R.string.comparison_many_conversations),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
             ComparisonToolbar(
                 conversations = state.conversations,
                 viewMode = state.viewMode,
                 enabled = !state.loading,
-                canAdd = state.selectedIds.size < COMPARISON_MAX_CONVERSATIONS,
+                canAdd = !state.loading,
                 onViewModeChange = vm::setViewMode,
                 onRemove = vm::removeConversation,
                 onAdd = onAddConversations ?: { showPicker = true },
@@ -261,15 +265,14 @@ fun ComparisonPage(
     }
 
     if (showPicker) {
-        // 列出全部未选中的会话；满载时点击由 addConversation 发 SelectionLimitReached
+        // 列出全部未选中的会话
         val options = remember(candidates, selectedIds) {
             availableCandidates(candidates, selectedIds)
         }
         ComparisonPickerSheet(
             conversations = options,
             selected = selectedIds,
-            enabled = !state.loading && selectedIds.size < COMPARISON_MAX_CONVERSATIONS,
-            atLimit = selectedIds.size >= COMPARISON_MAX_CONVERSATIONS,
+            enabled = !state.loading,
             onToggle = { id ->
                 if (id in selectedIds) vm.removeConversation(id) else vm.addConversation(id)
             },

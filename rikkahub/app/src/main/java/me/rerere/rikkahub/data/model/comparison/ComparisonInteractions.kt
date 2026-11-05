@@ -7,9 +7,6 @@ import kotlin.uuid.Uuid
 /** 少于两个会话的对比没有意义。 */
 const val COMPARISON_MIN_CONVERSATIONS = 2
 
-/** 一次对比最多容纳的会话数，再多屏幕和选择器都排不下。 */
-const val COMPARISON_MAX_CONVERSATIONS = 8
-
 /** 超过这个会话数时在对比页提示建图可能较慢，只提示不阻断。 */
 const val COMPARISON_LARGE_SELECTION_THRESHOLD = 32
 
@@ -40,9 +37,6 @@ fun restoreComparisonIds(saved: List<String>?, fallback: List<String>): List<Uui
 
 /** 选中数量够不够开始对比。 */
 fun canCompare(selected: Set<Uuid>): Boolean = selected.size >= COMPARISON_MIN_CONVERSATIONS
-
-/** 还能不能再加一个会话（已在选择里则不行）。 */
-fun canAddConversation(selected: Set<Uuid>, id: Uuid): Boolean = id !in selected
 
 /** 全选：取每个候选的 id（去重后）作为新的选择。 */
 fun selectAllCandidates(candidates: List<ComparisonCandidate>): Set<Uuid> =

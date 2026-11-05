@@ -5,7 +5,6 @@ import android.net.Uri
 import android.util.Log
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.Screen
-import me.rerere.rikkahub.data.model.comparison.COMPARISON_MAX_CONVERSATIONS
 import me.rerere.rikkahub.data.model.comparison.canCompare
 import me.rerere.rikkahub.ui.context.Navigator
 import kotlin.uuid.Uuid
@@ -49,8 +48,8 @@ fun pushToChatPage(
 }
 
 fun navigateToComparison(navigator: Navigator, ids: List<Uuid>) {
-    // 少于两条没得比；超过上限只取前 8 条，和选择器保持一致
-    val selected = ids.distinct().take(COMPARISON_MAX_CONVERSATIONS)
+    // 少于两条没得比
+    val selected = ids.distinct()
     if (!canCompare(selected.toSet())) return
     // 连点「对比分支」不重复压栈
     navigator.navigate(Screen.Comparison(ids = selected.map { it.toString() })) {

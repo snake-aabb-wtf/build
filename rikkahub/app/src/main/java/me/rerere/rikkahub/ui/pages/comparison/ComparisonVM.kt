@@ -30,7 +30,6 @@ import me.rerere.rikkahub.data.model.comparison.ConversationLoad
 import me.rerere.rikkahub.data.model.comparison.FileHasher
 import me.rerere.rikkahub.data.model.comparison.branchSignature
 import me.rerere.rikkahub.data.model.comparison.buildComparisonGraph
-import me.rerere.rikkahub.data.model.comparison.canAddConversation
 import me.rerere.rikkahub.data.model.comparison.conversationLoad
 import me.rerere.rikkahub.data.model.comparison.expandedWithSubtree
 import me.rerere.rikkahub.data.model.comparison.hasNoCommonStart
@@ -96,9 +95,6 @@ data class ComparisonUiState(
 sealed interface ComparisonEvent {
     /** 对比页停留期间有会话被删除，已经从选择里移出。 */
     data class ConversationsMissing(val count: Int) : ComparisonEvent
-
-    /** 选择数量已达到上限。 */
-    data object SelectionLimitReached : ComparisonEvent
 
     /** 要跳转的消息节点在会话里已经不存在。 */
     data object MessageMissing : ComparisonEvent
@@ -182,10 +178,7 @@ class ComparisonVM(
     }
 
     fun addConversation(id: Uuid) {
-        if (!canAddConversation(order.toSet(), id)) {
-            if (id !in order) _events.trySend(ComparisonEvent.SelectionLimitReached)
-            return
-        }
+        if (id in order) return
         order += id
         persistIds()
         rebuild()

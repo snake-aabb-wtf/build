@@ -137,14 +137,14 @@ class ComparisonInteractionsTest {
         assertTrue(available.none { it.id in selected })
         assertEquals(candidates.drop(6).map { it.id }, available.map { it.id })
 
-        // 已选 7 个时剩 1 个名额，但选择器仍列出全部 3 条，是否加得进由 canAddConversation 判定
+        // 无上限后，只要不在选择里就能继续加
         val seven = candidates.take(7).map { it.id }.toSet()
         assertEquals(3, availableCandidates(candidates, seven).size)
-        assertTrue(canAddConversation(seven, candidates[7].id))
+        assertTrue(candidates[7].id !in seven)
 
-        // 已选满 8 个：无上限后仍可加入
+        // 已选 8 个甚至更多：无上限，仍可加入
         val eight = candidates.take(8).map { it.id }.toSet()
-        assertTrue(canAddConversation(eight, candidates[8].id))
+        assertTrue(candidates[8].id !in eight)
         val atCap = availableCandidates(candidates, eight)
         assertEquals(2, atCap.size)
         assertTrue(atCap.none { it.id in eight })

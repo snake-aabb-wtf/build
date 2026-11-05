@@ -1813,7 +1813,7 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="comparison_loading_progress">正在加载 %1$d/%2$d 个会话…</string>
   <string name="comparison_cancel">取消</string>
   <string name="comparison_cancelled">已取消构建对比</string>
-  <string name="comparison_limit">最多只能对比 %1$d 个会话</string>
+  <string name="comparison_many_conversations">会话较多，建图可能需要几十秒；可随时点取消。</string>
   <string name="comparison_empty">暂无可对比的内容</string>
   <string name="comparison_failed">构建对比失败</string>
   <string name="comparison_no_common_prefix">这些会话没有共同开头</string>
