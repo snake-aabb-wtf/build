@@ -145,4 +145,4 @@ RIKKAHUB_KEY_PASSWORD
 
 ## 许可证与致谢
 
-感谢 RikkaHub 上游作者及贡献者。本项目源代码沿用 [GNU Affero General Public License v3.0（AGPL-3.0）](rikkahub/LICENSE)；终端等第三方组件保留各自的许可证与来源说明。
+感谢 RikkaHub 上游作者及贡献者。本项目源代码沿用 [GNU Affero General Public License v3.0（AGPL-3.0）](LICENSE)；终端等第三方组件保留各自的许可证与来源说明。
