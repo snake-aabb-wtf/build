@@ -1802,9 +1802,6 @@
   <!-- Branch comparison page -->
   <string name="comparison_page_title">Branch comparison</string>
   <string name="comparison_summary">%1$d nodes · %2$d conversations</string>
-  <string name="comparison_view_indented">Tree</string>
-  <string name="comparison_view_canvas">Canvas</string>
-  <string name="comparison_view_timeline">Timeline</string>
   <string name="comparison_refresh">Rebuild comparison</string>
   <string name="comparison_loading">Building comparison…</string>
   <string name="comparison_hashing">Reading local attachments…</string>
@@ -1824,9 +1821,7 @@
   <string name="comparison_fork">Fork</string>
   <string name="comparison_shared_by">Shared by %1$d conversations</string>
   <string name="comparison_fold_more">+%1$d more</string>
-  <string name="comparison_expand_text">Show full message</string>
   <string name="comparison_collapse_text">Show less</string>
-  <string name="comparison_depth">Depth %1$d</string>
   <string name="comparison_reset_view">Reset view</string>
   <string name="comparison_hidden_nodes">+%1$d more nodes — zoom in to see them</string>
   <string name="comparison_checkpoint_title">Context checkpoint</string>
@@ -1848,7 +1843,7 @@
   <string name="comparison_compare_action">Compare branches</string>
   <string name="comparison_select_hint">Pick at least 2 conversations</string>
   <string name="comparison_choose_source">Choose a source conversation</string>
-  <string name="comparison_large_graph">Large graph — switch to Tree to see everything</string>
+  <string name="comparison_large_graph">Large graph. Zoom, pan, or expand folded nodes to explore.</string>
   <string name="comparison_need_two">Select at least 2 conversations to compare</string>
   <string name="comparison_picker_title">Add conversations</string>
   <string name="comparison_picker_empty">No conversations available</string>

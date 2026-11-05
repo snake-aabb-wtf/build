@@ -8,7 +8,6 @@ import me.rerere.rikkahub.data.model.comparison.LayoutPoint
 import me.rerere.rikkahub.data.model.comparison.buildComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.subtreeSizes
 import me.rerere.rikkahub.data.model.comparison.tidyLayout
-import me.rerere.rikkahub.data.model.comparison.timelineLayout
 import me.rerere.rikkahub.data.model.toMessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -238,25 +237,9 @@ class ComparisonVisibilityTest {
     }
 
     @Test
-    fun `lane titles follow leaf conversations`() = runTest {
-        val graph = buildComparisonGraph(
-            listOf(
-                conversation("Alpha", "hi", "a"),
-                conversation("Beta", "hi", "b"),
-            ),
-            noFiles,
-        )
-        val layout = timelineLayout(graph, columnWidth = 320f, laneHeight = 160f)
-
-        val titles = laneTitles(graph, layout.points, laneHeight = 160f, laneCount = layout.leafCount)
-
-        assertEquals(setOf("Alpha", "Beta"), titles.toSet())
-    }
-
-    @Test
     fun `pan clamp centers small content and bounds large content`() {
-        assertEquals(100f, clampPanAxis(value = 999f, contentPx = 300f, viewportPx = 500f), 0.001f)
-        val large = clampPanAxis(value = 999_999f, contentPx = 3000f, viewportPx = 500f)
+        assertEquals(100f, clampPan(999f, startPx = 0f, endPx = 300f, viewportPx = 500f), 0.001f)
+        val large = clampPan(999_999f, startPx = 0f, endPx = 3000f, viewportPx = 500f)
         assertTrue(large <= 250f)
     }
 
@@ -313,8 +296,6 @@ class ComparisonVisibilityTest {
         assertEquals(-350f, clampPan(-9999f, startPx = 100f, endPx = 500f, viewportPx = 300f), 0.001f)
         // 内容比视口小：居中，并且减掉内容起点偏移
         assertEquals(50f, clampPan(0f, startPx = 100f, endPx = 300f, viewportPx = 500f), 0.001f)
-        // 与原 clampPanAxis 语义一致
-        assertEquals(clampPanAxis(9999f, 300f, 500f), clampPan(9999f, 0f, 300f, 500f), 0.001f)
     }
 
     @Test
@@ -365,25 +346,6 @@ class ComparisonVisibilityTest {
         )
         assertEquals(100f, offset.panX, 0.001f)
         assertEquals(100f, offset.panY, 0.001f)
-    }
-
-    @Test
-    fun `fit pan starts at the content edge when it is wider than the viewport`() {
-        assertEquals(0f, fitPan(contentPx = 400f, viewportPx = 300f, startPx = 0f), 0.001f)
-        assertEquals(50f, fitPan(contentPx = 200f, viewportPx = 300f), 0.001f)
-        assertEquals(-50f, fitPan(contentPx = 200f, viewportPx = 300f, startPx = 100f), 0.001f)
-    }
-
-    @Test
-    fun `chain flags stop at the visible indent depth`() {
-        var chain = emptyList<Boolean>()
-        repeat(200) { index -> chain = appendChain(chain, continuesBelow = index % 2 == 0) }
-
-        assertEquals(MAX_CHAIN_DEPTH, chain.size)
-        assertEquals(listOf(true, false, true), appendChain(listOf(true, false), continuesBelow = true))
-        // 截断保留的是最外层的前缀，连线不错位
-        assertEquals(true, chain.first())
-        assertEquals(false, chain[1])
     }
 
     private fun conversation(title: String, vararg texts: String) = Conversation(

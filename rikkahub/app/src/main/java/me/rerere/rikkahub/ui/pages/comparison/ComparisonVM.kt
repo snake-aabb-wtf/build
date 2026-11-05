@@ -41,19 +41,13 @@ import me.rerere.rikkahub.data.model.localFileUrls
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import kotlin.uuid.Uuid
 
-enum class ComparisonViewMode {
-    INDENTED,
-    CANVAS,
-    TIMELINE,
-}
-
 data class ComparisonConversationSummary(
     val id: Uuid,
     val title: String,
     val messageCount: Int,
 )
 
-/** 画布/时间线的视图状态：放在 VM 里，旋转、切换视图、换图都不重置。 */
+/** 画布的视图状态：放在 VM 里，保留缩放和平移位置。 */
 data class ComparisonViewport(
     val scale: Float = 1f,
     val panX: Float = 0f,
@@ -67,19 +61,11 @@ data class ComparisonUiState(
     val conversations: List<ComparisonConversationSummary> = emptyList(),
     /** 当前参与对比的会话 id（按选择顺序），选择器和 chip 共用。 */
     val selectedIds: Set<Uuid> = emptySet(),
-    val viewMode: ComparisonViewMode = ComparisonViewMode.INDENTED,
     val expanded: Set<String> = emptySet(),
     /** 画布视图的缩放/平移；pan 单位是像素。 */
     val canvasViewport: ComparisonViewport = ComparisonViewport(),
-    /** 时间线视图的平移（scale 恒为 1）。 */
-    val timelineViewport: ComparisonViewport = ComparisonViewport(),
-    /** 缩进树的位置：切到别的视图再回来时复用，不再回顶。 */
-    val indentFirstIndex: Int = 0,
-    val indentOffset: Int = 0,
-    val indentScrollX: Int = 0,
-    /** 画布/时间线是否已经做过首次 fit；重建图后复位。 */
+    /** 画布是否已经做过首次 fit；重建图后复位。 */
     val canvasFitted: Boolean = false,
-    val timelineFitted: Boolean = false,
     /** 加载进度：已读完的会话数 / 本次请求的会话数。 */
     val loadedCount: Int = 0,
     val totalCount: Int = 0,
@@ -106,7 +92,7 @@ sealed interface ComparisonEvent {
  * 会话读完一次就缓存在 [loaded] 里，增删会话只重建图，不再读数据库；附件哈希交给 [ComparisonFileHasher]
  * 按 (路径, 大小, 修改时间) 缓存。消息指纹每次重算：context checkpoint 会原地改写内容而不换 id，
  * 以 (会话, 消息 id) 为键的消息级缓存必然拿到过期指纹。
- * 视图模式和会话 id 放进 [SavedStateHandle]，进程重建后还能恢复。
+ * 会话 id、画布视口和展开状态放进 [SavedStateHandle]。
  */
 class ComparisonVM(
     ids: List<String>,
@@ -129,19 +115,9 @@ class ComparisonVM(
 
     private val _state = MutableStateFlow(
         ComparisonUiState(
-            viewMode = restoreViewMode(),
-            indentFirstIndex = savedStateHandle.get<Int>(KEY_INDENT_INDEX) ?: 0,
-            indentOffset = savedStateHandle.get<Int>(KEY_INDENT_OFFSET) ?: 0,
-            indentScrollX = savedStateHandle.get<Int>(KEY_INDENT_SCROLL_X) ?: 0,
             canvasViewport = restoreViewport(KEY_CANVAS_SCALE, KEY_CANVAS_PAN_X, KEY_CANVAS_PAN_Y),
-            timelineViewport = restoreViewport(
-                KEY_TIMELINE_SCALE,
-                KEY_TIMELINE_PAN_X,
-                KEY_TIMELINE_PAN_Y,
-            ),
             expanded = restoreExpanded(),
             canvasFitted = savedStateHandle.get<Boolean>(KEY_CANVAS_FITTED) ?: false,
-            timelineFitted = savedStateHandle.get<Boolean>(KEY_TIMELINE_FITTED) ?: false,
         )
     )
     val state: StateFlow<ComparisonUiState> = _state.asStateFlow()
@@ -191,12 +167,6 @@ class ComparisonVM(
         rebuild()
     }
 
-    fun setViewMode(mode: ComparisonViewMode) {
-        if (_state.value.viewMode == mode) return
-        savedStateHandle[KEY_VIEW_MODE] = mode.name
-        _state.update { it.copy(viewMode = mode) }
-    }
-
     fun setCanvasViewport(viewport: ComparisonViewport) {
         if (_state.value.canvasViewport == viewport) return
         savedStateHandle[KEY_CANVAS_SCALE] = viewport.scale
@@ -205,46 +175,11 @@ class ComparisonVM(
         _state.update { it.copy(canvasViewport = viewport) }
     }
 
-    fun setTimelineViewport(viewport: ComparisonViewport) {
-        if (_state.value.timelineViewport == viewport) return
-        savedStateHandle[KEY_TIMELINE_SCALE] = viewport.scale
-        savedStateHandle[KEY_TIMELINE_PAN_X] = viewport.panX
-        savedStateHandle[KEY_TIMELINE_PAN_Y] = viewport.panY
-        _state.update { it.copy(timelineViewport = viewport) }
-    }
-
-    /** 缩进树的滚动位置：切换视图、进程重建后都从原处继续。 */
-    fun setIndentPosition(firstVisibleIndex: Int, offset: Int, scrollX: Int) {
-        val current = _state.value
-        if (current.indentFirstIndex == firstVisibleIndex &&
-            current.indentOffset == offset &&
-            current.indentScrollX == scrollX
-        ) {
-            return
-        }
-        savedStateHandle[KEY_INDENT_INDEX] = firstVisibleIndex
-        savedStateHandle[KEY_INDENT_OFFSET] = offset
-        savedStateHandle[KEY_INDENT_SCROLL_X] = scrollX
-        _state.update {
-            it.copy(
-                indentFirstIndex = firstVisibleIndex,
-                indentOffset = offset,
-                indentScrollX = scrollX,
-            )
-        }
-    }
-
-    /** 画布首次 fit 完成；之后切换视图不再重新 fit，保留用户的缩放/平移。 */
+    /** 画布首次 fit 完成；页面返回时保留用户的缩放/平移。 */
     fun markCanvasFitted() {
         if (_state.value.canvasFitted) return
         savedStateHandle[KEY_CANVAS_FITTED] = true
         _state.update { it.copy(canvasFitted = true) }
-    }
-
-    fun markTimelineFitted() {
-        if (_state.value.timelineFitted) return
-        savedStateHandle[KEY_TIMELINE_FITTED] = true
-        _state.update { it.copy(timelineFitted = true) }
     }
 
     /**
@@ -426,11 +361,9 @@ class ComparisonVM(
                 noCommonStart = false,
                 selectedIds = requested.toSet(),
                 canvasFitted = false,
-                timelineFitted = false,
             )
         }
         savedStateHandle[KEY_CANVAS_FITTED] = false
-        savedStateHandle[KEY_TIMELINE_FITTED] = false
 
         buildJob = viewModelScope.launch {
             val conversations = ArrayList<Conversation>(requested.size)
@@ -586,12 +519,6 @@ class ComparisonVM(
     private fun restoreIds(fallback: List<String>): List<Uuid> =
         restoreComparisonIds(savedStateHandle.get<ArrayList<String>>(KEY_IDS), fallback)
 
-    private fun restoreViewMode(): ComparisonViewMode {
-        val saved = savedStateHandle.get<String>(KEY_VIEW_MODE)
-        return ComparisonViewMode.entries.firstOrNull { it.name == saved }
-            ?: ComparisonViewMode.INDENTED
-    }
-
     private fun restoreViewport(scaleKey: String, panXKey: String, panYKey: String): ComparisonViewport =
         ComparisonViewport(
             scale = savedStateHandle.get<Float>(scaleKey) ?: 1f,
@@ -608,19 +535,11 @@ class ComparisonVM(
 
     private companion object {
         const val KEY_IDS = "comparison_ids"
-        const val KEY_VIEW_MODE = "comparison_view_mode"
         const val KEY_EXPANDED = "comparison_expanded"
-        const val KEY_INDENT_INDEX = "comparison_indent_index"
-        const val KEY_INDENT_OFFSET = "comparison_indent_offset"
-        const val KEY_INDENT_SCROLL_X = "comparison_indent_scroll_x"
         const val KEY_CANVAS_SCALE = "comparison_canvas_scale"
         const val KEY_CANVAS_PAN_X = "comparison_canvas_pan_x"
         const val KEY_CANVAS_PAN_Y = "comparison_canvas_pan_y"
         const val KEY_CANVAS_FITTED = "comparison_canvas_fitted"
-        const val KEY_TIMELINE_SCALE = "comparison_timeline_scale"
-        const val KEY_TIMELINE_PAN_X = "comparison_timeline_pan_x"
-        const val KEY_TIMELINE_PAN_Y = "comparison_timeline_pan_y"
-        const val KEY_TIMELINE_FITTED = "comparison_timeline_fitted"
     }
 }
 

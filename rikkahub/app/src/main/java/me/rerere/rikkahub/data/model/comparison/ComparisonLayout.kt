@@ -38,23 +38,10 @@ fun tidyLayout(graph: ComparisonGraph, columnWidth: Float, rowHeight: Float): Co
     }
 }
 
-/** 横向时间线：叶子占 lane，内部节点取子节点 y 的中位数。 */
-fun timelineLayout(graph: ComparisonGraph, columnWidth: Float, laneHeight: Float): ComparisonLayout {
-    return layout(graph, columnWidth, laneHeight) { childrenY ->
-        val sorted = childrenY.sorted()
-        val middle = sorted.size / 2
-        if (sorted.size % 2 == 1) {
-            sorted[middle]
-        } else {
-            (sorted[middle - 1] + sorted[middle]) / 2f
-        }
-    }
-}
-
 /**
  * 显式栈的 DFS 后序遍历，避免上千层深的会话链把调用栈打爆。
  *
- * 产出的 y 语义统一为「卡片顶边」：叶子从 0 开始按 [rowHeight] 递增，内部节点取子节点 y 的中位/中点。
+ * 产出的 y 语义统一为「卡片顶边」：叶子从 0 开始按 [rowHeight] 递增，内部节点取首末子节点 y 的中点。
  * 视图直接 `offset(y)` 即可，不再各自减半张卡高。
  *
  * @param internalY 由子节点 y（按 childIds 顺序）算出内部节点 y
