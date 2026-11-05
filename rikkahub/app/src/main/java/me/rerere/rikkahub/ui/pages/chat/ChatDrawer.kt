@@ -345,10 +345,11 @@ fun ChatDrawerContent(
                     vm.generateTitle(it, true)
                 },
                 onDelete = {
-                    // 模态抽屉会盖住聊天页的 Snackbar，先收起抽屉再删除，撤销入口才点得到；
-                    // 协程跑在 Activity 级的抽屉 VM 上，删除当前会话后导航也不会中断撤销流程
-                    drawerVm.viewModelScope.launch {
-                        onCloseDrawer()
+                    launchDrawerDeletion(
+                        uiScope = scope,
+                        operationScope = drawerVm.viewModelScope,
+                        closeDrawer = onCloseDrawer,
+                    ) {
                         vm.deleteConversation(it).join()
                         conversations.refresh()
                         val deletedCurrent = it.id == current.id
