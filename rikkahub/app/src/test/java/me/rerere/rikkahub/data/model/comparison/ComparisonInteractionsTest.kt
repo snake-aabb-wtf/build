@@ -80,14 +80,47 @@ class ComparisonInteractionsTest {
     }
 
     @Test
-    fun `selection stops at the cap and frees a slot when removed`() {
-        val full = (1..COMPARISON_MAX_CONVERSATIONS).map { Uuid.random() }.toSet()
+    fun `toggle keeps adding past the old cap`() {
+        val nine = (1..9).map { Uuid.random() }.toSet()
         val extra = Uuid.random()
+        assertEquals(nine + extra, toggleComparisonSelection(nine, extra))
+    }
 
-        assertEquals(full, toggleComparisonSelection(full, extra))
-        assertFalse(canAddConversation(full, extra))
-        assertTrue(canAddConversation(toggleComparisonSelection(full, full.first()), extra))
-        assertFalse(canAddConversation(setOf(Uuid.random()), Uuid.random(), limit = 1))
+    @Test
+    fun `restore keeps every saved id`() {
+        val many = (1..12).map { Uuid.random().toString() }
+        assertEquals(12, restoreComparisonIds(saved = many, fallback = emptyList()).size)
+    }
+
+    @Test
+    fun `select all takes every candidate once`() {
+        val first = ComparisonCandidate(Uuid.random(), "a", Instant.EPOCH)
+        val second = ComparisonCandidate(Uuid.random(), "b", Instant.EPOCH)
+        val duplicate = first.copy(title = "a again")
+        assertEquals(
+            setOf(first.id, second.id),
+            selectAllCandidates(listOf(first, second, duplicate)),
+        )
+    }
+
+    @Test
+    fun `all selected is false for an empty list`() {
+        assertFalse(isAllSelected(emptySet(), emptyList()))
+        assertFalse(isAllSelected(setOf(Uuid.random()), emptyList()))
+    }
+
+    @Test
+    fun `all selected requires every visible candidate`() {
+        val first = ComparisonCandidate(Uuid.random(), "a", Instant.EPOCH)
+        val second = ComparisonCandidate(Uuid.random(), "b", Instant.EPOCH)
+        assertTrue(isAllSelected(setOf(first.id, second.id), listOf(first, second)))
+        assertFalse(isAllSelected(setOf(first.id), listOf(first, second)))
+    }
+
+    @Test
+    fun `large selection starts above the threshold`() {
+        assertFalse(isLargeSelection(COMPARISON_LARGE_SELECTION_THRESHOLD))
+        assertTrue(isLargeSelection(COMPARISON_LARGE_SELECTION_THRESHOLD + 1))
     }
 
     @Test
@@ -109,9 +142,9 @@ class ComparisonInteractionsTest {
         assertEquals(3, availableCandidates(candidates, seven).size)
         assertTrue(canAddConversation(seven, candidates[7].id))
 
-        // 已选满 8 个：选择器仍列出未选中的 2 条，但任何一条都加不进去
+        // 已选满 8 个：无上限后仍可加入
         val eight = candidates.take(8).map { it.id }.toSet()
-        assertFalse(canAddConversation(eight, candidates[8].id))
+        assertTrue(canAddConversation(eight, candidates[8].id))
         val atCap = availableCandidates(candidates, eight)
         assertEquals(2, atCap.size)
         assertTrue(atCap.none { it.id in eight })
@@ -141,12 +174,6 @@ class ComparisonInteractionsTest {
         assertEquals(emptyList<Uuid>(), restoreComparisonIds(saved = emptyList(), fallback = fallback))
         // 没存过才用路由参数
         assertEquals(listOf(first, second), restoreComparisonIds(saved = null, fallback = fallback))
-        // 超出上限时只取前 8 个
-        val many = (1..12).map { Uuid.random().toString() }
-        assertEquals(
-            COMPARISON_MAX_CONVERSATIONS,
-            restoreComparisonIds(saved = many, fallback = emptyList()).size,
-        )
     }
 
     @Test
