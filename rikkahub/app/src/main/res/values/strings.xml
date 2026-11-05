@@ -1843,6 +1843,8 @@
   <string name="comparison_part_empty">[Empty message]</string>
   <string name="comparison_select_mode">Select conversations</string>
   <string name="comparison_selected_count">Selected %1$d</string>
+  <string name="comparison_select_all">Select all</string>
+  <string name="comparison_clear_selection">Clear selection</string>
   <string name="comparison_compare_action">Compare branches</string>
   <string name="comparison_select_hint">Pick at least 2 conversations</string>
   <string name="comparison_choose_source">Choose a source conversation</string>

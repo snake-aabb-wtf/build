@@ -43,7 +43,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,8 +51,10 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.comparison.COMPARISON_MAX_CONVERSATIONS
+import me.rerere.rikkahub.data.model.comparison.ComparisonCandidate
 import me.rerere.rikkahub.data.model.comparison.canCompare
+import me.rerere.rikkahub.data.model.comparison.isAllSelected
+import me.rerere.rikkahub.data.model.comparison.selectAllCandidates
 import me.rerere.rikkahub.data.model.comparison.toggleComparisonSelection
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.SwipeToDelete
@@ -68,7 +69,6 @@ import kotlin.uuid.Uuid
 @Composable
 fun HistoryPage(vm: HistoryVM = koinViewModel()) {
     val navController = LocalNavController.current
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
@@ -82,23 +82,18 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
 
     val conversations by vm.conversations.collectAsStateWithLifecycle()
 
+    val candidates = remember(conversations) {
+        conversations.map { ComparisonCandidate(it.id, it.title, it.updateAt) }
+    }
+    val allSelected = isAllSelected(selectedIds, candidates)
+
     fun exitSelection() {
         selectionMode = false
         selectedIds = emptySet()
     }
 
     fun toggleSelection(id: Uuid) {
-        val next = toggleComparisonSelection(selectedIds, id)
-        // 到上限时选择不变：明确告诉用户为什么点不动
-        if (next == selectedIds && id !in selectedIds) {
-            scope.launch {
-                snackbarHostState.showSnackbar(
-                    context.getString(R.string.comparison_limit, COMPARISON_MAX_CONVERSATIONS)
-                )
-            }
-            return
-        }
-        selectedIds = next
+        selectedIds = toggleComparisonSelection(selectedIds, id)
     }
 
     BackHandler(enabled = selectionMode) {
@@ -158,6 +153,10 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                 SelectionBottomBar(
                     selectedCount = selectedIds.size,
                     canCompare = canCompare(selectedIds),
+                    allSelected = allSelected,
+                    onToggleAll = {
+                        selectedIds = if (allSelected) emptySet() else selectAllCandidates(candidates)
+                    },
                     onCompare = {
                         val ids = conversations.filter { it.id in selectedIds }.map { it.id }
                         if (ids.size >= 2) {
@@ -252,6 +251,8 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
 private fun SelectionBottomBar(
     selectedCount: Int,
     canCompare: Boolean,
+    allSelected: Boolean,
+    onToggleAll: () -> Unit,
     onCompare: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp) {
@@ -274,6 +275,14 @@ private fun SelectionBottomBar(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
+            TextButton(onClick = onToggleAll) {
+                Text(
+                    stringResource(
+                        if (allSelected) R.string.comparison_clear_selection
+                        else R.string.comparison_select_all
+                    )
+                )
+            }
             FilledTonalButton(
                 onClick = onCompare,
                 enabled = canCompare,

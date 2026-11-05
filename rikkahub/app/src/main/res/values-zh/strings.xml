@@ -1845,6 +1845,8 @@ mDNS 地址：使用 .local 主机名，同一网络中的其他设备可通过�
   <string name="comparison_part_empty">[空消息]</string>
   <string name="comparison_select_mode">选择会话</string>
   <string name="comparison_selected_count">已选 %1$d 个</string>
+  <string name="comparison_select_all">全选</string>
+  <string name="comparison_clear_selection">取消全选</string>
   <string name="comparison_compare_action">对比分支</string>
   <string name="comparison_select_hint">至少选择 2 个会话</string>
   <string name="comparison_choose_source">选择来源会话</string>
