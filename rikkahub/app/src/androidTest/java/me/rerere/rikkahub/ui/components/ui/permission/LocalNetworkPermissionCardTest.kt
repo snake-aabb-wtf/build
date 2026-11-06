@@ -17,7 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -41,6 +41,7 @@ class LocalNetworkPermissionCardTest {
     private lateinit var state: PermissionState
     private lateinit var permissionContext: LocalNetworkPermissionContext
     private lateinit var activity: ComponentActivity
+    private lateinit var rationaleActivity: LocalNetworkPermissionActivity
     private val singleLaunches = mutableListOf<String>()
     private val multipleLaunches = mutableListOf<List<String>>()
 
@@ -79,15 +80,15 @@ class LocalNetworkPermissionCardTest {
     }
 
     @Test
-    fun permanentDenialUsesExistingRationale() {
-        showCard()
-        compose.onNodeWithTag(CARD_TAG).performClick()
+    fun firstClickImmediatePermanentDenialShowsExistingRationale() {
+        showCard(singlePermissionResult = false)
         compose.runOnIdle {
-            assertEquals(listOf(Manifest.permission.ACCESS_LOCAL_NETWORK), singleLaunches)
-            state.handleSinglePermissionResult(Manifest.permission.ACCESS_LOCAL_NETWORK, false)
+            assertEquals(PermissionStatus.NotRequested, state.permissionStates[Manifest.permission.ACCESS_LOCAL_NETWORK])
+            assertFalse(state.showRationaleDialog)
+            assertEquals(0, singleLaunches.size)
         }
-
         compose.onNodeWithTag(CARD_TAG).performClick()
+        compose.waitForIdle()
 
         compose.runOnIdle {
             assertEquals(1, singleLaunches.size)
@@ -97,13 +98,64 @@ class LocalNetworkPermissionCardTest {
         compose.onNodeWithText(activity.getString(R.string.permission_go_to_settings)).assertIsDisplayed()
         compose.onNodeWithText(activity.getString(R.string.cancel)).performClick()
         compose.runOnIdle {
-            assertFalse(state.showRationaleDialog)
+            state.refreshPermissionStates()
         }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertFalse(state.showRationaleDialog)
+            assertEquals(1, singleLaunches.size)
+        }
+        compose.onNodeWithText(activity.getString(R.string.permission_go_to_settings)).assertDoesNotExist()
         compose.onNodeWithTag(CARD_TAG).assertIsDisplayed().performClick()
         compose.onNodeWithText(activity.getString(R.string.permission_go_to_settings)).assertIsDisplayed()
         compose.runOnIdle {
             assertEquals(1, singleLaunches.size)
         }
+    }
+
+    @Test
+    fun ordinaryDenialDoesNotAutomaticallyShowRationale() {
+        showCard()
+        compose.onNodeWithTag(CARD_TAG).performClick()
+        compose.runOnIdle {
+            rationaleActivity.showRationale = true
+            state.handleSinglePermissionResult(Manifest.permission.ACCESS_LOCAL_NETWORK, false)
+        }
+        compose.waitForIdle()
+
+        compose.runOnIdle {
+            assertEquals(PermissionStatus.Denied, state.permissionStates[Manifest.permission.ACCESS_LOCAL_NETWORK])
+            assertFalse(state.showRationaleDialog)
+            assertEquals(1, singleLaunches.size)
+        }
+        compose.onNodeWithTag(CARD_TAG).assertIsDisplayed()
+        compose.onNodeWithText(activity.getString(R.string.permission_go_to_settings)).assertDoesNotExist()
+
+        // A later status refresh is not the result of another card interaction.
+        compose.runOnIdle {
+            rationaleActivity.showRationale = false
+            state.refreshPermissionStates()
+        }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertFalse(state.showRationaleDialog)
+            assertEquals(1, singleLaunches.size)
+        }
+    }
+
+    @Test
+    fun grantedResultHidesCardWithoutRationale() {
+        showCard(singlePermissionResult = true)
+        compose.onNodeWithTag(CARD_TAG).performClick()
+        compose.waitForIdle()
+
+        compose.runOnIdle {
+            assertTrue(state.allRequiredPermissionsGranted)
+            assertFalse(state.showRationaleDialog)
+            assertEquals(1, singleLaunches.size)
+        }
+        compose.onNodeWithTag(CARD_TAG).assertDoesNotExist()
+        compose.onNodeWithText(activity.getString(R.string.permission_go_to_settings)).assertDoesNotExist()
     }
 
     @Test
@@ -125,11 +177,12 @@ class LocalNetworkPermissionCardTest {
         }
     }
 
-    private fun showCard() {
+    private fun showCard(singlePermissionResult: Boolean? = null) {
         compose.setContent {
             activity = LocalContext.current as ComponentActivity
             state = remember {
                 permissionContext = LocalNetworkPermissionContext(activity)
+                rationaleActivity = LocalNetworkPermissionActivity()
                 PermissionState(
                     permissions = setOf(
                         PermissionInfo(
@@ -140,7 +193,7 @@ class LocalNetworkPermissionCardTest {
                         )
                     ),
                     context = permissionContext,
-                    activity = activity,
+                    activity = rationaleActivity,
                 ).apply {
                     setPermissionLaunchers(
                         multiplePermissionLauncher = RecordingPermissionLauncher(
@@ -148,7 +201,12 @@ class LocalNetworkPermissionCardTest {
                         ) { multipleLaunches.add(it.toList()) },
                         singlePermissionLauncher = RecordingPermissionLauncher(
                             ActivityResultContracts.RequestPermission()
-                        ) { singleLaunches.add(it) },
+                        ) { permission ->
+                            singleLaunches.add(permission)
+                            singlePermissionResult?.let { granted ->
+                                state.handleSinglePermissionResult(permission, granted)
+                            }
+                        },
                     )
                 }
             }
@@ -161,6 +219,12 @@ class LocalNetworkPermissionCardTest {
                 }
             }
         }
+    }
+
+    private class LocalNetworkPermissionActivity : ComponentActivity() {
+        var showRationale = false
+
+        override fun shouldShowRequestPermissionRationale(permission: String): Boolean = showRationale
     }
 
     private class LocalNetworkPermissionContext(base: Context) : ContextWrapper(base) {

@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.ui.permission
 
+import android.Manifest
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -42,10 +48,27 @@ fun LocalNetworkPermissionCard(
     permissionState: PermissionState,
     modifier: Modifier = Modifier,
 ) {
+    val permissionStatus = permissionState.permissionStates[Manifest.permission.ACCESS_LOCAL_NETWORK]
+    var awaitingRequestResult by remember(permissionState) { mutableStateOf(false) }
+
+    LaunchedEffect(permissionState, permissionStatus, awaitingRequestResult) {
+        if (awaitingRequestResult && permissionStatus != PermissionStatus.NotRequested) {
+            // Consume this interaction before showing guidance, so canceling cannot reopen it.
+            awaitingRequestResult = false
+            if (permissionStatus == PermissionStatus.DeniedPermanently) {
+                permissionState.requestPermission(Manifest.permission.ACCESS_LOCAL_NETWORK)
+            }
+        }
+    }
+
     PermissionManager(permissionState = permissionState)
 
     Surface(
-        onClick = { permissionState.requestPermissions() },
+        onClick = {
+            // A fresh state cannot distinguish a first request from an earlier permanent denial.
+            awaitingRequestResult = permissionStatus == PermissionStatus.NotRequested
+            permissionState.requestPermissions()
+        },
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.tertiaryContainer,
