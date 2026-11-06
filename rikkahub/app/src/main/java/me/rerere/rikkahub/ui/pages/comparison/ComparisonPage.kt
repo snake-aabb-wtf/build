@@ -15,12 +15,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -32,6 +35,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,11 +58,13 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Refresh01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.comparison.COMPARISON_MIN_CONVERSATIONS
 import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.ComparisonNode
+import me.rerere.rikkahub.data.model.comparison.ComparisonOrientation
 import me.rerere.rikkahub.data.model.comparison.NodeOccurrence
 import me.rerere.rikkahub.data.model.comparison.availableCandidates
 import me.rerere.rikkahub.data.model.comparison.conversationEndpointTitles
@@ -68,6 +75,7 @@ import me.rerere.rikkahub.data.model.comparison.subtreeSizes
 import me.rerere.rikkahub.data.model.comparison.tidyLayout
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceString
 import me.rerere.rikkahub.ui.pages.comparison.views.CanvasTreeView
 import me.rerere.rikkahub.ui.pages.comparison.views.ComparisonMetrics
 import me.rerere.rikkahub.ui.pages.comparison.views.comparisonNodeText
@@ -78,6 +86,7 @@ import org.koin.core.parameter.parametersOf
 import kotlin.uuid.Uuid
 
 // 布局和画布卡片的列宽/行高由 ComparisonMetrics 统一提供
+private const val CANVAS_ORIENTATION_PREFERENCE = "comparison_canvas_orientation"
 
 @Composable
 fun ComparisonPage(
@@ -96,7 +105,12 @@ fun ComparisonPage(
     var showPicker by remember { mutableStateOf(false) }
     var occurrenceNode by remember { mutableStateOf<ComparisonNode?>(null) }
     var endpointSheetTitles by remember { mutableStateOf<List<String>?>(null) }
-    val metrics = remember { ComparisonMetrics() }
+    var savedOrientation by rememberSharedPreferenceString(
+        CANVAS_ORIENTATION_PREFERENCE, ComparisonOrientation.VERTICAL.name,
+    )
+    val orientation = ComparisonOrientation.fromPreference(savedOrientation)
+    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    val metrics = remember(fontScale) { ComparisonMetrics(rowHeight = 200.dp * fontScale) }
 
     LaunchedEffect(vm) {
         vm.events.collect { event ->
@@ -184,6 +198,10 @@ fun ComparisonPage(
                             contentDescription = stringResource(R.string.comparison_refresh),
                         )
                     }
+                    ComparisonOrientationMenu(
+                        orientation = orientation,
+                        onSelect = { savedOrientation = it.name },
+                    )
                 },
             )
         }
@@ -236,6 +254,7 @@ fun ComparisonPage(
             ComparisonContent(
                 state = state,
                 metrics = metrics,
+                orientation = orientation,
                 onCancelLoading = vm::cancelLoading,
                 onExpand = vm::expand,
                 onExpandSegment = vm::expandSegment,
@@ -289,6 +308,38 @@ fun ComparisonPage(
                 titles = endpointTitles,
                 onDismiss = { endpointSheetTitles = null },
             )
+        }
+    }
+}
+
+@Composable
+private fun ComparisonOrientationMenu(
+    orientation: ComparisonOrientation,
+    onSelect: (ComparisonOrientation) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val labels = mapOf(
+        ComparisonOrientation.VERTICAL to stringResource(R.string.comparison_orientation_vertical),
+        ComparisonOrientation.HORIZONTAL to stringResource(R.string.comparison_orientation_horizontal),
+    )
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                HugeIcons.MoreVertical,
+                contentDescription = stringResource(R.string.comparison_orientation, labels.getValue(orientation)),
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            ComparisonOrientation.entries.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(labels.getValue(option)) },
+                    leadingIcon = { RadioButton(selected = orientation == option, onClick = null) },
+                    onClick = {
+                        expanded = false
+                        onSelect(option)
+                    },
+                )
+            }
         }
     }
 }
@@ -459,13 +510,14 @@ private fun endpointTitlesOf(graph: ComparisonGraph?, node: ComparisonNode): Lis
 private fun ComparisonContent(
     state: ComparisonUiState,
     metrics: ComparisonMetrics,
+    orientation: ComparisonOrientation,
     onCancelLoading: () -> Unit,
     onExpand: (String) -> Unit,
     onExpandSegment: (String) -> Unit,
     onNodeClick: (ComparisonNode) -> Unit,
     onEndpointClick: (ComparisonNode) -> Unit,
-    onCanvasViewportChange: (ComparisonViewport) -> Unit,
-    onCanvasFitted: () -> Unit,
+    onCanvasViewportChange: (ComparisonOrientation, ComparisonViewport) -> Unit,
+    onCanvasFitted: (ComparisonOrientation) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val graph = state.graph
@@ -495,8 +547,8 @@ private fun ComparisonContent(
         )
 
         else -> {
-            val tidy = remember(graph, metrics) {
-                tidyLayout(graph, metrics.columnWidth.value, metrics.rowHeight.value)
+            val tidy = remember(graph, metrics, orientation) {
+                tidyLayout(graph, metrics.columnWidth.value, metrics.rowHeight.value, orientation)
             }
             if (tidy.points.isEmpty()) {
                 ComparisonPlaceholder(
@@ -511,24 +563,28 @@ private fun ComparisonContent(
                 CompositionLocalProvider(
                     LocalLayoutDirection provides LayoutDirection.Ltr
                 ) {
-                    CanvasTreeView(
-                        graph = graph,
-                        layout = tidy,
-                        sizes = sizes,
-                        endpointIds = endpoints,
-                        expanded = state.expanded,
-                        viewport = state.canvasViewport,
-                        onViewportChange = onCanvasViewportChange,
-                        onExpand = onExpand,
-                        onNodeClick = onNodeClick,
-                        metrics = metrics,
-                        modifier = modifier,
-                        endpointTitles = endpointTitles,
-                        onEndpointClick = onEndpointClick,
-                        fitted = state.canvasFitted,
-                        onFitted = onCanvasFitted,
-                        onExpandSegment = onExpandSegment,
-                    )
+                    key(orientation) {
+                        val canvas = state.canvas[orientation]
+                        CanvasTreeView(
+                            graph = graph,
+                            layout = tidy,
+                            orientation = orientation,
+                            sizes = sizes,
+                            endpointIds = endpoints,
+                            expanded = state.expanded,
+                            viewport = canvas.viewport,
+                            onViewportChange = { onCanvasViewportChange(orientation, it) },
+                            onExpand = onExpand,
+                            onNodeClick = onNodeClick,
+                            metrics = metrics,
+                            modifier = modifier,
+                            endpointTitles = endpointTitles,
+                            onEndpointClick = onEndpointClick,
+                            fitted = canvas.fitted,
+                            onFitted = { onCanvasFitted(orientation) },
+                            onExpandSegment = onExpandSegment,
+                        )
+                    }
                 }
             }
         }

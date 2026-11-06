@@ -74,7 +74,7 @@ git log 5ad19405 -- app/src/main/java/me/rerere/rikkahub/service/ConversationSes
 ## 分支对比约束
 
 - 候选为当前助手的普通可见会话，不含归档/回收站；至少 2 个即可对比，支持全选与清空，无数量硬上限。超过 32 个仅提示耗时。
-- 只取每个消息节点当前选中的候选，按共同前缀建树；分叉后不重新汇合。对比页仅保留自由画布，使用 `ComparisonGraph` 解释消息；横轴表示消息层级，不是真实时间间隔。
+- 只取每个消息节点当前选中的候选，按共同前缀建树；分叉后不重新汇合。对比页仅使用自由画布，两种布局方向共用 `ComparisonGraph`。默认竖向并记住最后选择；竖向沿纵轴、横向沿横轴表示消息层级，不是真实时间间隔。文字保持正向，分别保留每个方向的视口；图重建时两者重新适配。
 - 指纹比较角色与可见内容，不让 ID、时间或模型名产生假分叉。新增消息 part、引用或审批状态时，检查 `ComparisonFingerprint.kt` 与对应测试；工具 JSON 中的字面路径不能直接当成附件 part 处理。
 - 可读取的本地附件使用完整文件 SHA-256，不用文件大小、mtime、路径或大小阈值代替内容。文件哈希可按现有文件属性键缓存；不要恢复仅以会话/消息 ID 缓存消息指纹的策略，压缩点等内容可能原地变化。
 - 建图与文件读取放后台，保留取消检查和 generation 隔离；旧 job 不得覆盖新状态。新的同步请求应使旧请求失效；读库异常与“会话不存在”要区分，异常不能导致删除选择。取消后的建图不能被返回页面的自动同步立即重启。
@@ -116,7 +116,7 @@ Windows 使用 PowerShell 的 `Copy-Item` 和 `.\gradlew.bat`。Gradle 的 `web:
 | 根文档 | `git diff --check`，核对路径、命令和下载链接；无需仅为文档重建 APK |
 | Android 应用逻辑 | 相关回归测试、`:app:testGithubDebugUnitTest` 与 `:app:assembleGithubDebug` |
 | 会话生命周期、归档、删除 | `ConversationSessionTest`、`ConversationSessionManagerTest`、`ConversationStatusMapperTest`、`TrashedWriteGuardTest`；另检查实际入口与索引行为 |
-| 分支对比 | `data/model/comparison/` 的测试与 `ComparisonVisibilityTest`；UI 变动检查全选、取消、返回重建、三键导航底栏和缩放/点击 |
+| 分支对比 | `data/model/comparison/` 的测试、`ComparisonCanvasStateTest`、`CanvasGeometryTest` 与 `ComparisonVisibilityTest`；UI 变动检查方向记忆、分别恢复视口、全选、取消、返回重建、三键导航底栏、缩放/点击及展开入口 |
 | Web 前端 | 在 `web-ui/` 运行 `pnpm run typecheck`、`pnpm exec oxlint app`、`pnpm run fmt:check`、`pnpm run build`，并检查实际页面交互 |
 | 其他模块 | 对应模块的测试与受影响的应用构建，不把应用测试当作所有模块测试 |
 

@@ -11,9 +11,9 @@ import androidx.compose.ui.unit.dp
  */
 @Immutable
 data class ComparisonMetrics(
-    /** 画布视图每一层的横向间距。 */
+    /** 物理横向间距：横版为消息层级，竖版为相邻分支。 */
     val columnWidth: Dp = 300.dp,
-    /** 画布视图相邻叶子的纵向间距，必须大于卡片高度（大字号下卡片能到 150dp）。 */
+    /** 物理纵向间距：竖版为消息层级，横版为相邻分支；随字号增加以容纳卡片。 */
     val rowHeight: Dp = 200.dp,
     val cardWidth: Dp = 220.dp,
     val cardHeight: Dp = 96.dp,

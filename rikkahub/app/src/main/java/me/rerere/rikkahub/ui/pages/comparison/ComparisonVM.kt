@@ -26,6 +26,7 @@ import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.comparison.ComparisonCandidate
 import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
+import me.rerere.rikkahub.data.model.comparison.ComparisonOrientation
 import me.rerere.rikkahub.data.model.comparison.ConversationLoad
 import me.rerere.rikkahub.data.model.comparison.FileHasher
 import me.rerere.rikkahub.data.model.comparison.branchSignature
@@ -47,13 +48,6 @@ data class ComparisonConversationSummary(
     val messageCount: Int,
 )
 
-/** 画布的视图状态：放在 VM 里，保留缩放和平移位置。 */
-data class ComparisonViewport(
-    val scale: Float = 1f,
-    val panX: Float = 0f,
-    val panY: Float = 0f,
-)
-
 data class ComparisonUiState(
     val loading: Boolean = true,
     val hashing: Boolean = false,
@@ -62,10 +56,8 @@ data class ComparisonUiState(
     /** 当前参与对比的会话 id（按选择顺序），选择器和 chip 共用。 */
     val selectedIds: Set<Uuid> = emptySet(),
     val expanded: Set<String> = emptySet(),
-    /** 画布视图的缩放/平移；pan 单位是像素。 */
-    val canvasViewport: ComparisonViewport = ComparisonViewport(),
-    /** 画布是否已经做过首次 fit；重建图后复位。 */
-    val canvasFitted: Boolean = false,
+    /** 横竖方向分别保留缩放/平移和首次 fit 状态；重建图后同时重新适配。 */
+    val canvas: ComparisonCanvasState = ComparisonCanvasState(),
     /** 加载进度：已读完的会话数 / 本次请求的会话数。 */
     val loadedCount: Int = 0,
     val totalCount: Int = 0,
@@ -115,9 +107,11 @@ class ComparisonVM(
 
     private val _state = MutableStateFlow(
         ComparisonUiState(
-            canvasViewport = restoreViewport(KEY_CANVAS_SCALE, KEY_CANVAS_PAN_X, KEY_CANVAS_PAN_Y),
+            canvas = ComparisonCanvasState(
+                horizontal = restoreCanvas(ComparisonOrientation.HORIZONTAL),
+                vertical = restoreCanvas(ComparisonOrientation.VERTICAL),
+            ),
             expanded = restoreExpanded(),
-            canvasFitted = savedStateHandle.get<Boolean>(KEY_CANVAS_FITTED) ?: false,
         )
     )
     val state: StateFlow<ComparisonUiState> = _state.asStateFlow()
@@ -167,19 +161,21 @@ class ComparisonVM(
         rebuild()
     }
 
-    fun setCanvasViewport(viewport: ComparisonViewport) {
-        if (_state.value.canvasViewport == viewport) return
-        savedStateHandle[KEY_CANVAS_SCALE] = viewport.scale
-        savedStateHandle[KEY_CANVAS_PAN_X] = viewport.panX
-        savedStateHandle[KEY_CANVAS_PAN_Y] = viewport.panY
-        _state.update { it.copy(canvasViewport = viewport) }
+    fun setCanvasViewport(orientation: ComparisonOrientation, viewport: ComparisonViewport) {
+        val current = _state.value.canvas[orientation]
+        if (current.viewport == viewport) return
+        val next = current.copy(viewport = viewport)
+        persistCanvas(orientation, next)
+        _state.update { it.copy(canvas = it.canvas.updated(orientation, next)) }
     }
 
     /** 画布首次 fit 完成；页面返回时保留用户的缩放/平移。 */
-    fun markCanvasFitted() {
-        if (_state.value.canvasFitted) return
-        savedStateHandle[KEY_CANVAS_FITTED] = true
-        _state.update { it.copy(canvasFitted = true) }
+    fun markCanvasFitted(orientation: ComparisonOrientation) {
+        val current = _state.value.canvas[orientation]
+        if (current.fitted) return
+        val next = current.copy(fitted = true)
+        persistCanvas(orientation, next)
+        _state.update { it.copy(canvas = it.canvas.updated(orientation, next)) }
     }
 
     /**
@@ -360,10 +356,12 @@ class ComparisonVM(
                 missingCount = 0,
                 noCommonStart = false,
                 selectedIds = requested.toSet(),
-                canvasFitted = false,
+                canvas = it.canvas.invalidateFits(),
             )
         }
-        savedStateHandle[KEY_CANVAS_FITTED] = false
+        ComparisonOrientation.entries.forEach { orientation ->
+            savedStateHandle[canvasKey(orientation, "fitted")] = false
+        }
 
         buildJob = viewModelScope.launch {
             val conversations = ArrayList<Conversation>(requested.size)
@@ -519,12 +517,27 @@ class ComparisonVM(
     private fun restoreIds(fallback: List<String>): List<Uuid> =
         restoreComparisonIds(savedStateHandle.get<ArrayList<String>>(KEY_IDS), fallback)
 
-    private fun restoreViewport(scaleKey: String, panXKey: String, panYKey: String): ComparisonViewport =
-        ComparisonViewport(
-            scale = savedStateHandle.get<Float>(scaleKey) ?: 1f,
-            panX = savedStateHandle.get<Float>(panXKey) ?: 0f,
-            panY = savedStateHandle.get<Float>(panYKey) ?: 0f,
+    private fun restoreCanvas(orientation: ComparisonOrientation): CanvasViewportState =
+        CanvasViewportState(
+            viewport = ComparisonViewport(
+                scale = savedStateHandle.get<Float>(canvasKey(orientation, "scale")) ?: 1f,
+                panX = savedStateHandle.get<Float>(canvasKey(orientation, "pan_x")) ?: 0f,
+                panY = savedStateHandle.get<Float>(canvasKey(orientation, "pan_y")) ?: 0f,
+            ),
+            fitted = savedStateHandle.get<Boolean>(canvasKey(orientation, "fitted")) ?: false,
         )
+
+    private fun persistCanvas(orientation: ComparisonOrientation, state: CanvasViewportState) {
+        savedStateHandle[canvasKey(orientation, "scale")] = state.viewport.scale
+        savedStateHandle[canvasKey(orientation, "pan_x")] = state.viewport.panX
+        savedStateHandle[canvasKey(orientation, "pan_y")] = state.viewport.panY
+        savedStateHandle[canvasKey(orientation, "fitted")] = state.fitted
+    }
+
+    // 横版沿用旧键；竖版使用独立键，避免升级后把原来的横版视口当成竖版。
+    private fun canvasKey(orientation: ComparisonOrientation, suffix: String): String =
+        if (orientation == ComparisonOrientation.HORIZONTAL) "comparison_canvas_$suffix"
+        else "comparison_canvas_vertical_$suffix"
 
     private fun persistExpanded(expanded: Set<String>) {
         savedStateHandle[KEY_EXPANDED] = ArrayList(expanded)
@@ -536,10 +549,6 @@ class ComparisonVM(
     private companion object {
         const val KEY_IDS = "comparison_ids"
         const val KEY_EXPANDED = "comparison_expanded"
-        const val KEY_CANVAS_SCALE = "comparison_canvas_scale"
-        const val KEY_CANVAS_PAN_X = "comparison_canvas_pan_x"
-        const val KEY_CANVAS_PAN_Y = "comparison_canvas_pan_y"
-        const val KEY_CANVAS_FITTED = "comparison_canvas_fitted"
     }
 }
 
