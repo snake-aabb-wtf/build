@@ -10,6 +10,8 @@
 
 **Spec:** `rikkahub/docs/superpowers/specs/2026-11-06-upstream-permission-compression-design.md`；本计划只负责其中局域网权限部分，压缩输入见同目录 `2026-11-06-compression-keep-recent-input.md`。
 
+**用户执行调整（2026-11-06）：**取消真机及模拟器运行验证，删除本次模拟器。继续功能实现、JVM 测试、AndroidTest 编译、APK 构建和独立审查。下文涉及设备上的 UI RED/GREEN、授权弹窗及返回交互的步骤不执行，不将编译或源代码审查记为运行验证通过。
+
 ## Global Constraints
 
 - 所有文件路径相对仓库根；Gradle 命令从 `rikkahub/` 运行，Windows 使用 `gradlew.bat`。
