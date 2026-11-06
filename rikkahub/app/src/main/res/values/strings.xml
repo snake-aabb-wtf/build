@@ -1803,6 +1803,9 @@
   <string name="comparison_page_title">Branch comparison</string>
   <string name="comparison_summary">%1$d nodes · %2$d conversations</string>
   <string name="comparison_refresh">Rebuild comparison</string>
+  <string name="comparison_orientation">Layout direction: %1$s</string>
+  <string name="comparison_orientation_vertical">Vertical</string>
+  <string name="comparison_orientation_horizontal">Horizontal</string>
   <string name="comparison_loading">Building comparison…</string>
   <string name="comparison_hashing">Reading local attachments…</string>
   <string name="comparison_loading_progress">Loading %1$d/%2$d conversations…</string>

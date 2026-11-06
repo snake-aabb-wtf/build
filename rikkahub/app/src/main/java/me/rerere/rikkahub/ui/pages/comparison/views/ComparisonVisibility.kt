@@ -257,7 +257,7 @@ internal fun clampPan(value: Float, startPx: Float, endPx: Float, viewportPx: Fl
     return value.coerceIn(viewportPx - slack - endPx, slack - startPx)
 }
 
-/** 按内容包围盒计算首次进入的视口：完整容纳且不放大超过 [maxScale]，居中对齐。 */
+/** 按像素包围盒计算首次视口：尽量完整容纳且不放大超过 [maxScale]，居中对齐。 */
 internal fun fitViewport(
     contentWidthPx: Float,
     contentHeightPx: Float,
@@ -279,12 +279,12 @@ internal fun fitViewport(
     val panX = if (visibleWidth <= viewportWidthPx) {
         (viewportWidthPx - visibleWidth) / 2f - left * scale
     } else {
-        0f
+        -left * scale
     }
     val panY = if (visibleHeight <= viewportHeightPx) {
         (viewportHeightPx - visibleHeight) / 2f - top * scale
     } else {
-        0f
+        -top * scale
     }
     return ComparisonViewport(scale = scale, panX = panX, panY = panY)
 }

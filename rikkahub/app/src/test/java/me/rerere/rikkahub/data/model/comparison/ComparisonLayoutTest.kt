@@ -16,7 +16,7 @@ class ComparisonLayoutTest {
     fun `single chain has one leaf and no overlaps`() = runTest {
         val graph = buildComparisonGraph(listOf(conversation("A", "m0", "m1", "m2", "m3")), noFiles)
 
-        val layout = tidyLayout(graph, columnWidth = 100f, rowHeight = 50f)
+        val layout = tidyLayout(graph, columnWidth = 100f, rowHeight = 50f, orientation = ComparisonOrientation.HORIZONTAL)
 
         assertEquals(4, layout.points.size)
         assertEquals(1, layout.leafCount)
@@ -36,7 +36,7 @@ class ComparisonLayoutTest {
             noFiles,
         )
 
-        val layout = tidyLayout(graph, columnWidth = 100f, rowHeight = 50f)
+        val layout = tidyLayout(graph, columnWidth = 100f, rowHeight = 50f, orientation = ComparisonOrientation.HORIZONTAL)
 
         assertEquals(2, layout.leafCount)
         val leaves = graph.nodes.values.filter { it.childIds.isEmpty() }.map { layout.points.getValue(it.id) }
@@ -57,7 +57,7 @@ class ComparisonLayoutTest {
             noFiles,
         )
 
-        val layout = tidyLayout(graph, columnWidth = 100f, rowHeight = 50f)
+        val layout = tidyLayout(graph, columnWidth = 100f, rowHeight = 50f, orientation = ComparisonOrientation.HORIZONTAL)
 
         val root = layout.points.getValue(graph.rootIds.single())
         val children = graph.nodes.getValue(graph.rootIds.single()).childIds

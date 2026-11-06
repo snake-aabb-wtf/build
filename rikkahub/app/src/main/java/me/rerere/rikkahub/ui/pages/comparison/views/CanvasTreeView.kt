@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -19,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -31,6 +33,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
@@ -41,6 +44,7 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.comparison.ComparisonGraph
 import me.rerere.rikkahub.data.model.comparison.ComparisonLayout
 import me.rerere.rikkahub.data.model.comparison.ComparisonNode
+import me.rerere.rikkahub.data.model.comparison.ComparisonOrientation
 import me.rerere.rikkahub.data.model.comparison.LayoutPoint
 import me.rerere.rikkahub.ui.pages.comparison.ComparisonViewport
 import kotlin.math.max
@@ -48,6 +52,13 @@ import kotlin.math.roundToInt
 
 internal const val MinCanvasScale = 0.2f
 internal const val MaxCanvasScale = 3f
+
+private data class CanvasExpansion(
+    val point: LayoutPoint,
+    val nodeId: String,
+    val hiddenCount: Int,
+    val linear: Boolean,
+)
 
 /**
  * 自由画布：tidy-tree 布局 + 双指缩放/拖动，贝塞尔连线。
@@ -60,6 +71,7 @@ internal const val MaxCanvasScale = 3f
 fun CanvasTreeView(
     graph: ComparisonGraph,
     layout: ComparisonLayout,
+    orientation: ComparisonOrientation,
     sizes: Map<String, Int>,
     endpointIds: Set<String>,
     expanded: Set<String>,
@@ -90,11 +102,36 @@ fun CanvasTreeView(
     val latestOnChange by rememberUpdatedState(onViewportChange)
     val cardWidth = metrics.cardWidth
     val cardHeight = metrics.cardHeight
+    // 实测未缩放的卡高：竖向连线必须从卡片底部出发，大字号不能用最小高度代替。
+    val cardHeights = remember(graph, metrics, density.fontScale) { mutableStateMapOf<String, Float>() }
     // 纵向按整行高度算：卡片实际能到 120~150dp，按 96 裁剪会在行间留缝
     val rowHeight = metrics.rowHeight
-    // 包围盒取折叠后的可见节点：折叠掉的子树不该继续把画布拉长
-    val bounds = remember(points, visible, cardWidth, rowHeight) {
-        contentBounds(points, visible, cardWidth.value, rowHeight.value)
+    val expansions = remember(graph, points, folded, linear, visible, orientation, metrics, sizes) {
+        buildList {
+            folded.forEach { id ->
+                if (id !in visible) return@forEach
+                val parent = points[id] ?: return@forEach
+                add(
+                    CanvasExpansion(
+                        canvasFoldPoint(parent, orientation, metrics.columnWidth.value, rowHeight.value),
+                        nodeId = id, hiddenCount = foldHiddenCount(sizes, id), linear = false,
+                    )
+                )
+            }
+            linear.anchors.forEach { (id, count) ->
+                if (graph.nodes[id]?.parentId !in visible) return@forEach
+                val point = points[id] ?: return@forEach
+                add(CanvasExpansion(point.copy(id = "segment:$id"), id, count, linear = true))
+            }
+        }
+    }
+    val visualPoints = remember(points, expansions) {
+        points + expansions.associate { it.point.id to it.point }
+    }
+    val visualIds = remember(visible, expansions) { visible + expansions.map { it.point.id } }
+    // 展开入口也参与适配、限位和裁剪，避免宽分叉的按钮落在视口之外。
+    val bounds = remember(visualPoints, visualIds, cardWidth, rowHeight) {
+        contentBounds(visualPoints, visualIds, cardWidth.value, rowHeight.value)
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize().clipToBounds()) {
@@ -106,15 +143,8 @@ fun CanvasTreeView(
         val latestDensity by rememberUpdatedState(densityValue)
         // 首次进入 / 换图时 fit 一次；旋转或缩放后只重新限位，不重置用户的视图
 
-        fun fit(): ComparisonViewport = bounds?.let { box ->
-            fitViewport(
-                contentWidthPx = (box.right - box.left) * densityValue,
-                contentHeightPx = (box.bottom - box.top) * densityValue,
-                viewportWidthPx = viewportWidthPx,
-                viewportHeightPx = viewportHeightPx,
-                bounds = box,
-            )
-        } ?: ComparisonViewport()
+        fun fit(): ComparisonViewport =
+            fitCanvasViewport(bounds, densityValue, viewportWidthPx, viewportHeightPx)
 
         val latestFit by rememberUpdatedState(fit())
 
@@ -157,10 +187,10 @@ fun CanvasTreeView(
             marginDp = max(cardWidth.value, rowHeight.value),
         )
         // 先按折叠过滤，再按视口裁剪并截断到上限；都是纯函数，单测覆盖。
-        val drawn = remember(points, visible, world, cardWidth, rowHeight) {
+        val drawn = remember(visualPoints, visualIds, world, cardWidth, rowHeight) {
             visibleInViewportCapped(
-                points = points,
-                candidates = visible,
+                points = visualPoints,
+                candidates = visualIds,
                 world = world,
                 cardWidthDp = cardWidth.value,
                 cardHeightDp = rowHeight.value,
@@ -226,6 +256,8 @@ fun CanvasTreeView(
                     panY = viewport.panY,
                     cardWidthDp = cardWidth.value,
                     cardHeightDp = cardHeight.value,
+                    cardHeights = cardHeights,
+                    orientation = orientation,
                 )
             }
 
@@ -247,6 +279,7 @@ fun CanvasTreeView(
                         minHeight = cardHeight,
                         modifier = Modifier
                             .offset { IntOffset(screenX, screenY) }
+                            .onSizeChanged { cardHeights[point.id] = it.height / densityValue }
                             .graphicsLayer {
                                 scaleX = scale
                                 scaleY = scale
@@ -256,56 +289,40 @@ fun CanvasTreeView(
                         onClick = { onNodeClick(node) },
                     )
 
-                    // 折叠的是子树，不是这个节点：卡片照常画，chip 落在子节点列
-                    if (point.id in folded) {
-                        val anchor = node.childIds.firstOrNull()?.let { points[it] } ?: point
-                        if (intersectsViewport(anchor, world, cardWidth.value, rowHeight.value)) {
-                            val chipX = (anchor.x * densityValue * scale + viewport.panX).roundToInt()
-                            val chipY = (anchor.y * densityValue * scale + viewport.panY).roundToInt()
-                            ComparisonFoldChip(
-                                hiddenCount = foldHiddenCount(sizes, point.id),
-                                endpoint = point.id in endpointIds,
-                                fork = node.childIds.size > 1,
-                                modifier = Modifier
-                                    .offset { IntOffset(chipX, chipY) }
-                                    .graphicsLayer {
-                                        scaleX = scale
-                                        scaleY = scale
-                                        transformOrigin = TransformOrigin(0f, 0f)
-                                    },
-                                onClick = { onExpand(point.id) },
-                            )
-                        }
-                    }
                 }
             }
 
-            // 线性长链的中段：chip 挂在第一颗被藏起来的节点位置，点一下恢复整段
-            linear.anchors.forEach { (anchorId, count) ->
-                if (anchorId in drawn.ids) return@forEach
-                val anchor = points[anchorId] ?: return@forEach
-                val parentId = graph.nodes[anchorId]?.parentId ?: return@forEach
-                if (parentId !in drawn.ids) return@forEach
-                if (!intersectsViewport(anchor, world, cardWidth.value, rowHeight.value)) {
-                    return@forEach
-                }
-                ComparisonFoldChip(
-                    hiddenCount = count,
-                    label = stringResource(R.string.comparison_linear_more, count),
-                    modifier = Modifier
-                        .offset {
-                            IntOffset(
-                                (anchor.x * densityValue * scale + viewport.panX).roundToInt(),
-                                (anchor.y * densityValue * scale + viewport.panY).roundToInt(),
-                            )
-                        }
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                            transformOrigin = TransformOrigin(0f, 0f)
+            // 入口独立裁剪：平移后即使父卡片不在当前屏幕内，仍可点开可见的 chip。
+            expansions.forEach { expansion ->
+                val anchor = expansion.point
+                if (anchor.id !in drawn.ids) return@forEach
+                key(anchor.id) {
+                    ComparisonFoldChip(
+                        hiddenCount = expansion.hiddenCount,
+                        label = if (expansion.linear) {
+                            stringResource(R.string.comparison_linear_more, expansion.hiddenCount)
+                        } else null,
+                        endpoint = !expansion.linear && expansion.nodeId in endpointIds,
+                        fork = !expansion.linear,
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(
+                                    (anchor.x * densityValue * scale + viewport.panX).roundToInt(),
+                                    (anchor.y * densityValue * scale + viewport.panY).roundToInt(),
+                                )
+                            }
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                transformOrigin = TransformOrigin(0f, 0f)
+                            }
+                            .widthIn(max = cardWidth),
+                        onClick = {
+                            if (expansion.linear) onExpandSegment(expansion.nodeId)
+                            else onExpand(expansion.nodeId)
                         },
-                    onClick = { onExpandSegment(anchorId) },
-                )
+                    )
+                }
             }
 
             if (drawn.hiddenCount > 0) {
@@ -351,17 +368,14 @@ private fun DrawScope.drawCanvasEdges(
     panY: Float,
     cardWidthDp: Float,
     cardHeightDp: Float,
+    cardHeights: Map<String, Float>,
+    orientation: ComparisonOrientation,
 ) {
-    val cardWidthPx = cardWidthDp * density * scale
-    val cardHeightPx = cardHeightDp * density * scale
     val stroke = 1.5.dp.toPx()
     val unit = density * scale
 
     fun screenX(worldX: Float): Float = worldX * unit + panX
     fun screenY(worldY: Float): Float = worldY * unit + panY
-
-    fun outside(x: Float, y: Float): Boolean =
-        x + cardWidthPx < 0f || x > size.width || y + cardHeightPx < 0f || y > size.height
 
     graph.nodes.values.forEach { node ->
         val parentId = node.parentId ?: return@forEach
@@ -369,21 +383,18 @@ private fun DrawScope.drawCanvasEdges(
         val start = points[parentId] ?: return@forEach
         val end = points[node.id] ?: return@forEach
 
-        // y 是卡片顶边，连线接在竖直中线
-        val startX = screenX(start.x) + cardWidthPx
-        val startY = screenY(start.y) + cardHeightPx / 2f
-        val endX = screenX(end.x)
-        val endY = screenY(end.y) + cardHeightPx / 2f
-
-        if (outside(startX, startY) && outside(endX, endY)) return@forEach
-
-        val gap = (endX - startX).coerceAtLeast(1f)
+        val edge = canvasEdge(
+            start, end, cardWidthDp,
+            parentHeight = cardHeights[parentId] ?: cardHeightDp,
+            childHeight = cardHeights[node.id] ?: cardHeightDp,
+            orientation = orientation,
+        )
         val path = Path().apply {
-            moveTo(startX, startY)
+            moveTo(screenX(edge.startX), screenY(edge.startY))
             cubicTo(
-                startX + gap * 0.5f, startY,
-                endX - gap * 0.5f, endY,
-                endX, endY,
+                screenX(edge.control1X), screenY(edge.control1Y),
+                screenX(edge.control2X), screenY(edge.control2Y),
+                screenX(edge.endX), screenY(edge.endY),
             )
         }
         drawPath(path, color, style = Stroke(width = stroke))
